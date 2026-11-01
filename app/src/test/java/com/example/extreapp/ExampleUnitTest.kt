@@ -1,17 +1,149 @@
 package com.example.extreapp
 
+import com.example.extreapp.data.local.InMemoryPersistenceStore
+import com.example.extreapp.data.local.entity.PeriodFilterMode
+import com.example.extreapp.data.local.entity.TransactionType
+import com.example.extreapp.data.repository.ExtreRepository
+import com.example.extreapp.domain.parser.StatementParserDispatcher
+import org.junit.Assert.assertEquals
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertTrue
 import org.junit.Test
+import java.io.File
 
-import org.junit.Assert.*
-
-/**
- * Example local unit test, which will execute on the development machine (host).
- *
- * See [testing documentation](http://d.android.com/tools/testing).
- */
 class ExampleUnitTest {
+
+    private fun loadHesapOzetiBytes(): ByteArray {
+        val candidates = listOf(
+            File("HESAP_OZETI.csv"),
+            File("../HESAP_OZETI.csv"),
+            File("src/main/assets/HESAP_OZETI.csv"),
+            File("app/src/main/assets/HESAP_OZETI.csv")
+        )
+        val file = candidates.firstOrNull { it.exists() }
+            ?: error("HESAP_OZETI.csv bulunamadı")
+        return file.readBytes()
+    }
+
     @Test
-    fun addition_isCorrect() {
-        assertEquals(4, 2 + 2)
+    fun hesapOzetiCsvFullAnalysisAndDeduplicationTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+
+        // 1. Verify Windows-1254 encoding detection and statement header metadata
+        assertEquals("windows-1254", parsed.detectedCharset)
+        assertEquals("Axess Gold MC / **** **** **** 1795", parsed.metadata.cardInfo)
+        assertEquals("30.10.2026", parsed.metadata.statementDate)
+        assertEquals("2026-10", parsed.metadata.statementYearMonth)
+        assertEquals("84.951,86 TL", parsed.metadata.statementDebt)
+
+        // 2. Verify GYMFIT same-day duplicate preservation (2 transactions on 11.10.2026 + 2 on other days = 4 total)
+        val gymfitTxs = parsed.transactions.filter { it.rawDescription.contains("GYMFIT") }
+        assertEquals(4, gymfitTxs.size)
+
+        // 3. Verify foreign currency 0,00 TL row was attached to STEAMGAMES.COM
+        val steamTx = parsed.transactions.firstOrNull { it.rawDescription.contains("STEAMGAMES.COM") }
+        assertNotNull(steamTx)
+        assertEquals(2280.64, steamTx!!.amount, 0.01)
+        assertEquals("44.48 USD", steamTx.foreignCurrencyNote)
+
+        // 4. Verify debt payment (-56.602,83 TL) is classified as PAYMENT
+        val paymentTxs = parsed.transactions.filter { it.type == TransactionType.PAYMENT }
+        assertEquals(1, paymentTxs.size)
+        assertEquals(56602.83, paymentTxs.first().amount, 0.01)
+
+        // 5. Verify Amazon installment refunds (-966,50 TL, 01/06 and 02/06)
+        val refundTxs = parsed.transactions.filter { it.type == TransactionType.REFUND }
+        assertEquals(2, refundTxs.size)
+        assertEquals(1, refundTxs[0].installmentCurrent)
+        assertEquals(6, refundTxs[0].installmentTotal)
+        assertEquals(2, refundTxs[1].installmentCurrent)
+        assertEquals(6, refundTxs[1].installmentTotal)
+
+        // 6. Verify deduplication when importing the same statement twice
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        val firstReport = repo.importParsedStatement(parsed)
+        assertEquals(parsed.transactions.size, firstReport.newlyInsertedCount)
+        assertEquals(0, firstReport.duplicateSkippedCount)
+
+        val secondReport = repo.importParsedStatement(parsed)
+        assertEquals(0, secondReport.newlyInsertedCount)
+        assertEquals(parsed.transactions.size, secondReport.duplicateSkippedCount)
+    }
+
+    @Test
+    fun ruleMatchingPriorityAndMerchantAnalyticsTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        // Approve Amazon group -> all 6 Amazon transactions (including refunds and uppercase AMAZON.COM) should match
+        val amazonMatchedCount = repo.approveAndCreateRule(
+            keyword = "AMAZON.COM",
+            merchantDisplayName = "Amazon",
+            categoryId = 4L, // E-Ticaret & Alışveriş
+            priority = 10
+        )
+        assertEquals(6, amazonMatchedCount)
+
+        // Verify Month-over-Month analytics for Amazon (September 2026 vs October 2026)
+        val amazonMerchant = repo.computeMerchantSummaries().first { it.merchant.displayName == "Amazon" }
+        val amazonDetail = repo.computeMerchantDetail(amazonMerchant.merchant.id)
+        assertNotNull(amazonDetail)
+        assertEquals(2, amazonDetail!!.monthlyTotals.size)
+        val sepTotal = amazonDetail.monthlyTotals.first { it.yearMonth == "2026-09" }
+        val octTotal = amazonDetail.monthlyTotals.first { it.yearMonth == "2026-10" }
+        // In 2026-09: 5406.00 expense - 966.50 refund = 4439.50 net
+        assertEquals(4439.50, sepTotal.netSpend, 0.01)
+        // In 2026-10: (1151.96 + 24.90 + 925.52) - 966.50 = 1135.88 net
+        assertEquals(1135.88, octTotal.netSpend, 0.01)
+
+        // Multi-keyword merchant: Starbucks ("STARBUCKS" + "SBUX")
+        repo.approveAndCreateRule(keyword = "STARBUCKS", merchantDisplayName = "Starbucks", categoryId = 2L, priority = 10)
+        repo.approveAndCreateRule(keyword = "SBUX", merchantDisplayName = "Starbucks", categoryId = 2L, priority = 10)
+        val sbuxSummary = repo.computeMerchantSummaries().first { it.merchant.displayName == "Starbucks" }
+        assertEquals(2, sbuxSummary.transactionCount)
+        assertEquals(920.00, sbuxSummary.netSpend, 0.01)
+
+        // Rule Priority: Specific "IKEA ANKARA RESTORAN" (priority 20 -> Restoran 2L) vs general "IKEA" (priority 10 -> Ev 7L)
+        repo.approveAndCreateRule(keyword = "IKEA", merchantDisplayName = "IKEA Mağaza", categoryId = 7L, priority = 10)
+        repo.approveAndCreateRule(
+            keyword = "IKEA ANKARA RESTORAN",
+            merchantDisplayName = "IKEA Restoran",
+            categoryId = 2L,
+            priority = 20,
+            applyToPastApprovedTransactions = true
+        )
+        repo.reapplyAllRules(overrideAlreadyApproved = true)
+
+        val ikeaStore = repo.computeMerchantSummaries().first { it.merchant.displayName == "IKEA Mağaza" }
+        val ikeaRest = repo.computeMerchantSummaries().first { it.merchant.displayName == "IKEA Restoran" }
+        assertEquals(6065.92, ikeaStore.netSpend, 0.01)
+        assertEquals(455.00, ikeaRest.netSpend, 0.01)
+    }
+
+    @Test
+    fun backupExportAndRestoreRoundTripTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+        repo.approveAndCreateRule(keyword = "YEMEKSEPET", merchantDisplayName = "Yemeksepeti", categoryId = 2L)
+
+        val overviewBefore = repo.computeMonthlyOverview("2026-10", PeriodFilterMode.STATEMENT_PERIOD)
+        val json = repo.exportBackupJson()
+        assertTrue(json.isNotBlank())
+
+        repo.clearAllData()
+        assertEquals(0, repo.snapshot.value.transactions.size)
+
+        val restoreReport = repo.restoreBackupJson(json)
+        assertEquals(parsed.transactions.size, restoreReport.transactionsCount)
+        assertEquals(1, restoreReport.rulesCount)
+
+        val overviewAfter = repo.computeMonthlyOverview("2026-10", PeriodFilterMode.STATEMENT_PERIOD)
+        assertEquals(overviewBefore.netExpenseTotal, overviewAfter.netExpenseTotal, 0.01)
+        assertEquals(overviewBefore.unapprovedCount, overviewAfter.unapprovedCount)
     }
 }
