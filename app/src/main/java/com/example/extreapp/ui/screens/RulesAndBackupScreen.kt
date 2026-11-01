@@ -1,5 +1,6 @@
 package com.example.extreapp.ui.screens
 
+import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.horizontalScroll
@@ -33,12 +34,17 @@ import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.DeleteOutline
 import androidx.compose.material.icons.outlined.DoneAll
 import androidx.compose.material.icons.outlined.Edit
+import androidx.compose.material.icons.outlined.Fingerprint
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.Refresh
 import androidx.compose.material.icons.outlined.Restore
 import androidx.compose.material.icons.outlined.Security
+import androidx.compose.material.icons.outlined.Shield
 import androidx.compose.material.icons.outlined.Storefront
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
@@ -50,6 +56,7 @@ import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
+import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
@@ -69,8 +76,10 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Dialog
 import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.LockTimeout
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.RuleEntity
 import com.example.extreapp.domain.engine.RuleMatchCandidate
@@ -87,7 +96,8 @@ import com.example.extreapp.ui.theme.resolveCategoryIcon
 private enum class RulesBackupSubTab(val title: String) {
     RULES("Kurallar"),
     CATEGORIES("Kategoriler"),
-    BACKUP("Yedek & Veri")
+    BACKUP("Yedek"),
+    SECURITY("Güvenlik")
 }
 
 @OptIn(ExperimentalLayoutApi::class)
@@ -105,6 +115,11 @@ fun RulesAndBackupScreen(
     onApproveAllCandidatesForRule: (anchorRuleId: Long, candidates: List<RuleMatchCandidate>) -> Unit,
     onAddCategory: (name: String, colorHex: Long) -> Unit,
     onClearAllData: () -> Unit,
+    onTogglePrivacyMode: () -> Unit = {},
+    onSetBiometricLockEnabled: (Boolean) -> Unit = {},
+    onSetScreenProtectionEnabled: (Boolean) -> Unit = {},
+    onSetLockTimeout: (LockTimeout) -> Unit = {},
+    onLockAppNow: () -> Unit = {},
     modifier: Modifier = Modifier
 ) {
     var selectedSubTab by remember { mutableIntStateOf(0) }
@@ -244,6 +259,7 @@ fun RulesAndBackupScreen(
                         RulesBackupSubTab.RULES -> " (${uiState.rules.size})"
                         RulesBackupSubTab.CATEGORIES -> " (${uiState.categories.size})"
                         RulesBackupSubTab.BACKUP -> ""
+                        RulesBackupSubTab.SECURITY -> if (uiState.isBiometricLockEnabled) " •" else ""
                     }
                     Surface(
                         shape = RoundedCornerShape(10.dp),
@@ -791,6 +807,384 @@ fun RulesAndBackupScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+            }
+            RulesBackupSubTab.SECURITY -> {
+                SecuritySettingsSection(
+                    uiState = uiState,
+                    onTogglePrivacyMode = onTogglePrivacyMode,
+                    onSetBiometricLockEnabled = onSetBiometricLockEnabled,
+                    onSetScreenProtectionEnabled = onSetScreenProtectionEnabled,
+                    onSetLockTimeout = onSetLockTimeout,
+                    onLockAppNow = onLockAppNow
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun SecuritySettingsSection(
+    uiState: ExtreUiState,
+    onTogglePrivacyMode: () -> Unit,
+    onSetBiometricLockEnabled: (Boolean) -> Unit,
+    onSetScreenProtectionEnabled: (Boolean) -> Unit,
+    onSetLockTimeout: (LockTimeout) -> Unit,
+    onLockAppNow: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+
+    LazyColumn(
+        modifier = Modifier.fillMaxSize(),
+        contentPadding = PaddingValues(bottom = 24.dp),
+        verticalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        // 1. Hero Security Banner
+        item {
+            Card(
+                shape = RoundedCornerShape(22.dp),
+                colors = CardDefaults.cardColors(
+                    containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.35f)
+                ),
+                border = BorderStroke(
+                    width = 1.dp,
+                    color = MaterialTheme.colorScheme.primary.copy(alpha = 0.25f)
+                ),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(18.dp),
+                    verticalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Surface(
+                            shape = CircleShape,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.16f),
+                            modifier = Modifier.size(40.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Security,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+                        Column {
+                            Text(
+                                text = "GÜVENLİK & GİZLİLİK",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = MaterialTheme.colorScheme.primary,
+                                letterSpacing = 1.sp
+                            )
+                            Text(
+                                text = "Cihaz İçi Veri Kalkanı",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+
+                    Text(
+                        text = "ExtreApp verilerinizi hiçbir uzak sunucuya aktarmaz, %100 çevrimdışı çalışır. Tutar maskeleme, biyometrik kilit ve ekran koruma kalkanı ile meraklı gözlerden tam koruma sağlayabilirsiniz.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+        }
+
+        // 2. Privacy Mode Card (Tutar Maskeleme - Persisted)
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = (if (uiState.isPrivacyModeEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant).copy(alpha = 0.15f),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = if (uiState.isPrivacyModeEnabled) Icons.Outlined.VisibilityOff else Icons.Outlined.Visibility,
+                                    contentDescription = null,
+                                    tint = if (uiState.isPrivacyModeEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Tutar Maskeleme (Gizlilik Modu)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Tüm harcama ve bakiye tutarlarını '***' olarak gizler. Uygulama açılışında son tercihiniz otomatik geri yüklenir.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Switch(
+                        checked = uiState.isPrivacyModeEnabled,
+                        onCheckedChange = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onTogglePrivacyMode()
+                        }
+                    )
+                }
+            }
+        }
+
+        // 3. Screen Protection Card (C.2 - FLAG_SECURE)
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .padding(16.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Row(
+                        modifier = Modifier.weight(1f),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Surface(
+                            shape = RoundedCornerShape(12.dp),
+                            color = (if (uiState.isScreenProtectionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant).copy(alpha = 0.15f),
+                            modifier = Modifier.size(44.dp)
+                        ) {
+                            Box(contentAlignment = Alignment.Center) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Shield,
+                                    contentDescription = null,
+                                    tint = if (uiState.isScreenProtectionEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.size(22.dp)
+                                )
+                            }
+                        }
+
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = "Görsel Gizlilik (Ekran Koruması)",
+                                style = MaterialTheme.typography.titleSmall,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Spacer(modifier = Modifier.height(2.dp))
+                            Text(
+                                text = "Son uygulamalar (App Switcher) önizlemesinde ekstre içeriğini gizler ve ekran görüntüsü (screenshot) alınmasını kısıtlar (FLAG_SECURE).",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.width(8.dp))
+
+                    Switch(
+                        checked = uiState.isScreenProtectionEnabled,
+                        onCheckedChange = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSetScreenProtectionEnabled(it)
+                        }
+                    )
+                }
+            }
+        }
+
+        // 4. Biometric Lock Card (C.1 - Biometric & PIN Lock)
+        item {
+            Card(
+                shape = RoundedCornerShape(20.dp),
+                colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            modifier = Modifier.weight(1f),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Surface(
+                                shape = RoundedCornerShape(12.dp),
+                                color = (if (uiState.isBiometricLockEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.surfaceVariant).copy(alpha = 0.15f),
+                                modifier = Modifier.size(44.dp)
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Fingerprint,
+                                        contentDescription = null,
+                                        tint = if (uiState.isBiometricLockEnabled) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                        modifier = Modifier.size(24.dp)
+                                    )
+                                }
+                            }
+
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Biyometrik Kilit (Parmak İzi / PIN)",
+                                    style = MaterialTheme.typography.titleSmall,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Uygulama açılırken ve arka plandan dönüldüğünde parmak izi, yüz tanıma veya cihaz şifresi ister.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        Spacer(modifier = Modifier.width(8.dp))
+
+                        Switch(
+                            checked = uiState.isBiometricLockEnabled,
+                            onCheckedChange = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSetBiometricLockEnabled(it)
+                            }
+                        )
+                    }
+
+                    // Biometric hardware status pill
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(8.dp)
+                        ) {
+                            Icon(
+                                imageVector = if (uiState.biometricAvailability.isUsable) Icons.Outlined.CheckCircleOutline else Icons.Outlined.Security,
+                                contentDescription = null,
+                                tint = if (uiState.biometricAvailability.isUsable) AppleGreenLight else AppleOrangeLight,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = uiState.biometricAvailability.title,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+
+                    // Options visible when Biometric Lock is ON
+                    if (uiState.isBiometricLockEnabled) {
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+
+                        Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Text(
+                                text = "Otomatik Kilitlenme Süresi",
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = FontWeight.Bold
+                            )
+                            Text(
+                                text = "Uygulama arka plana geçtiğinde ne kadar süre sonra kilit devreye girsin?",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                LockTimeout.entries.forEach { timeout ->
+                                    val isSelected = uiState.lockTimeout == timeout
+                                    Surface(
+                                        shape = RoundedCornerShape(10.dp),
+                                        color = if (isSelected) MaterialTheme.colorScheme.primaryContainer else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f),
+                                        border = BorderStroke(
+                                            width = 1.dp,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else Color.Transparent
+                                        ),
+                                        modifier = Modifier
+                                            .weight(1f)
+                                            .applePressScale {
+                                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                onSetLockTimeout(timeout)
+                                            }
+                                    ) {
+                                        Text(
+                                            text = timeout.title,
+                                            style = MaterialTheme.typography.labelMedium,
+                                            fontWeight = if (isSelected) FontWeight.Bold else FontWeight.Medium,
+                                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                                            textAlign = TextAlign.Center,
+                                            modifier = Modifier.padding(vertical = 10.dp)
+                                        )
+                                    }
+                                }
+                            }
+                        }
+
+                        HorizontalDivider(
+                            thickness = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f)
+                        )
+
+                        // Lock Now Button
+                        OutlinedButton(
+                            onClick = {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onLockAppNow()
+                            },
+                            shape = RoundedCornerShape(12.dp),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Lock,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Uygulamayı Şimdi Kilitle")
                         }
                     }
                 }

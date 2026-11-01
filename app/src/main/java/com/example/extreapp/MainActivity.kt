@@ -1,7 +1,8 @@
 package com.example.extreapp
 
 import android.os.Bundle
-import androidx.activity.ComponentActivity
+import android.view.WindowManager
+import androidx.fragment.app.FragmentActivity
 import androidx.activity.compose.BackHandler
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.compose.setContent
@@ -20,12 +21,14 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ReceiptLong
 import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DonutLarge
+import androidx.compose.material.icons.outlined.Lock
 import androidx.compose.material.icons.outlined.PendingActions
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.Visibility
@@ -46,6 +49,8 @@ import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -58,10 +63,15 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import com.example.extreapp.domain.security.BiometricAuthManager
 import com.example.extreapp.ui.AppTab
 import com.example.extreapp.ui.ExtreViewModel
+import com.example.extreapp.ui.components.AppleAppLockScreen
 import com.example.extreapp.ui.components.ColumnMappingWizardDialog
 import com.example.extreapp.ui.components.ImportReportDialog
 import com.example.extreapp.ui.screens.ApprovalQueueScreen
@@ -73,7 +83,7 @@ import com.example.extreapp.ui.theme.ExtreAppTheme
 import com.example.extreapp.ui.theme.applePressScale
 import java.time.LocalDate
 
-class MainActivity : ComponentActivity() {
+class MainActivity : FragmentActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         enableEdgeToEdge()
@@ -92,6 +102,43 @@ fun ExtreAppRoot() {
     val haptic = LocalHapticFeedback.current
     val viewModel: ExtreViewModel = viewModel(factory = ExtreViewModel.provideFactory(context))
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
+    val activity = context as? FragmentActivity
+
+    // Check device biometric capability on launch
+    LaunchedEffect(Unit) {
+        val availability = BiometricAuthManager.checkAvailability(context)
+        viewModel.updateBiometricAvailability(availability)
+    }
+
+    // Screen Protection (C.2 - FLAG_SECURE)
+    LaunchedEffect(uiState.isScreenProtectionEnabled) {
+        activity?.let { act ->
+            if (uiState.isScreenProtectionEnabled) {
+                act.window.setFlags(
+                    WindowManager.LayoutParams.FLAG_SECURE,
+                    WindowManager.LayoutParams.FLAG_SECURE
+                )
+            } else {
+                act.window.clearFlags(WindowManager.LayoutParams.FLAG_SECURE)
+            }
+        }
+    }
+
+    // Background / Foreground lifecycle observer for auto-lock timeout
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_STOP) {
+                viewModel.onAppBackgrounded()
+            } else if (event == Lifecycle.Event.ON_START) {
+                viewModel.onAppForegrounded()
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose {
+            lifecycleOwner.lifecycle.removeObserver(observer)
+        }
+    }
 
     // Back handler when viewing a specific Merchant's detail analytics
     BackHandler(enabled = uiState.selectedMerchantId != null) {
@@ -203,6 +250,30 @@ fun ExtreAppRoot() {
                         }
                     },
                     actions = {
+                        // Quick Lock Button (visible when Biometric Lock is ON)
+                        if (uiState.isBiometricLockEnabled) {
+                            Surface(
+                                shape = CircleShape,
+                                color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                                modifier = Modifier
+                                    .padding(end = 6.dp)
+                                    .size(34.dp)
+                                    .applePressScale {
+                                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                        viewModel.lockAppNow()
+                                    }
+                            ) {
+                                Box(contentAlignment = Alignment.Center) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Lock,
+                                        contentDescription = "Hemen Kilitle",
+                                        tint = MaterialTheme.colorScheme.primary,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                }
+                            }
+                        }
+
                         // Privacy mode toggle (Hide/Show all currency amounts as ***)
                         Surface(
                             shape = RoundedCornerShape(20.dp),
@@ -642,12 +713,52 @@ fun ExtreAppRoot() {
                                 onAddCategory = { name, hex ->
                                     viewModel.addCustomCategory(name, "Category", hex)
                                 },
-                                onClearAllData = { viewModel.clearAllDatabase() }
+                                onClearAllData = { viewModel.clearAllDatabase() },
+                                onTogglePrivacyMode = { viewModel.togglePrivacyMode() },
+                                onSetBiometricLockEnabled = { enabled ->
+                                    if (enabled) {
+                                        activity?.let { act ->
+                                            BiometricAuthManager.authenticate(
+                                                activity = act,
+                                                title = "Biyometrik Kilidi Etkinleştir",
+                                                subtitle = "Uygulama kilidini aktif etmek için kimliğinizi doğrulayın",
+                                                onSuccess = {
+                                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                                    viewModel.setBiometricLockEnabled(true)
+                                                }
+                                            )
+                                        } ?: viewModel.setBiometricLockEnabled(true)
+                                    } else {
+                                        viewModel.setBiometricLockEnabled(false)
+                                    }
+                                },
+                                onSetScreenProtectionEnabled = { viewModel.setScreenProtectionEnabled(it) },
+                                onSetLockTimeout = { viewModel.setLockTimeout(it) },
+                                onLockAppNow = { viewModel.lockAppNow() }
                             )
                         }
                     }
                 }
             }
         }
+    }
+
+    // Full-screen Apple-style Lock Overlay
+    if (uiState.isAppLocked) {
+        AppleAppLockScreen(
+            onUnlockClick = {
+                activity?.let { act ->
+                    BiometricAuthManager.authenticate(
+                        activity = act,
+                        title = "ExtreApp Kimlik Doğrulama",
+                        subtitle = "Uygulamaya erişmek için kimliğinizi doğrulayın",
+                        onSuccess = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.setAppLocked(false)
+                        }
+                    )
+                }
+            }
+        )
     }
 }

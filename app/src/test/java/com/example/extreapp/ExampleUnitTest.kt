@@ -595,4 +595,59 @@ class ExampleUnitTest {
         // 165 - 124 = 41 TL increase -> 41 / 124 * 100 = ~33.06%
         assertEquals(33.06, simSpotify.priceChangePercent!!, 0.5)
     }
+
+    @Test
+    fun securityAndPrivacyModePersistenceTest() {
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        val securityPrefs = com.example.extreapp.data.local.InMemorySecurityPreferences(
+            isPrivacyModeEnabled = false,
+            isBiometricLockEnabled = false,
+            isScreenProtectionEnabled = true,
+            lockTimeout = com.example.extreapp.data.local.entity.LockTimeout.IMMEDIATE
+        )
+
+        // 1. Initial State: Privacy Mode should be false
+        val vm1 = com.example.extreapp.ui.ExtreViewModel(repo, securityPrefs)
+        assertEquals(false, securityPrefs.isPrivacyModeEnabled)
+        assertEquals(false, securityPrefs.isBiometricLockEnabled)
+        assertEquals(true, securityPrefs.isScreenProtectionEnabled)
+        assertEquals(false, vm1.uiState.value.isAppLocked)
+
+        // 2. Toggle Privacy Mode to TRUE and verify persistence
+        vm1.togglePrivacyMode()
+        assertEquals("Tercih anında kaydedilmeli", true, securityPrefs.isPrivacyModeEnabled)
+
+        // 3. Simulate App Restart: Create new ViewModel with the persisted preferences
+        val vm2 = com.example.extreapp.ui.ExtreViewModel(repo, securityPrefs)
+        assertEquals("Privacy mode uygulama yeniden açıldığında son açık halini korumalı", true, vm2.uiState.value.isPrivacyModeEnabled)
+
+        // 4. Test Screen Protection (FLAG_SECURE) persistence
+        vm2.setScreenProtectionEnabled(false)
+        assertEquals(false, securityPrefs.isScreenProtectionEnabled)
+
+        val vm3 = com.example.extreapp.ui.ExtreViewModel(repo, securityPrefs)
+        assertEquals("Ekran koruma tercihi uygulama yeniden açıldığında korunmalı", false, vm3.uiState.value.isScreenProtectionEnabled)
+
+        // 5. Test Biometric Lock & Startup Auto-lock
+        vm3.setBiometricLockEnabled(true)
+        assertEquals(true, securityPrefs.isBiometricLockEnabled)
+
+        // When biometric lock is enabled, new app launch should start LOCKED
+        val vm4 = com.example.extreapp.ui.ExtreViewModel(repo, securityPrefs)
+        assertEquals("Biyometrik kilit aktifken uygulama kilitli başlamalı", true, vm4.isAppLocked)
+
+        // Unlock
+        vm4.setAppLocked(false)
+        assertEquals(false, vm4.isAppLocked)
+
+        // 6. Test Manual Quick Lock
+        vm4.lockAppNow()
+        assertEquals(true, vm4.isAppLocked)
+        vm4.setAppLocked(false)
+
+        // 7. Test Lock Timeout configuration
+        vm4.setLockTimeout(com.example.extreapp.data.local.entity.LockTimeout.FIVE_MINUTES)
+        assertEquals(com.example.extreapp.data.local.entity.LockTimeout.FIVE_MINUTES, securityPrefs.lockTimeout)
+        assertEquals(com.example.extreapp.data.local.entity.LockTimeout.FIVE_MINUTES, vm4.currentLockTimeout)
+    }
 }

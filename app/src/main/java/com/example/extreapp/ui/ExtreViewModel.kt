@@ -7,11 +7,15 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import com.example.extreapp.data.local.ExtreSqliteHelper
+import com.example.extreapp.data.local.SecurityPreferences
+import com.example.extreapp.data.local.SharedPreferencesSecurityPreferences
 import com.example.extreapp.data.local.entity.ApprovalQueueGroup
+import com.example.extreapp.data.local.entity.BiometricAvailability
 import com.example.extreapp.data.local.entity.CategoryEntity
 import com.example.extreapp.data.local.entity.DashboardAnalyticsMode
 import com.example.extreapp.data.local.entity.InstallmentCashflowProjection
 import com.example.extreapp.data.local.entity.LoadedStatementSummary
+import com.example.extreapp.data.local.entity.LockTimeout
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
 import com.example.extreapp.data.local.entity.MonthOverMonthComparison
@@ -52,6 +56,11 @@ enum class AppTab {
 data class ExtreUiState(
     val activeTab: AppTab = AppTab.DASHBOARD,
     val isPrivacyModeEnabled: Boolean = false,
+    val isBiometricLockEnabled: Boolean = false,
+    val isScreenProtectionEnabled: Boolean = true,
+    val lockTimeout: LockTimeout = LockTimeout.IMMEDIATE,
+    val isAppLocked: Boolean = false,
+    val biometricAvailability: BiometricAvailability = BiometricAvailability.AVAILABLE,
     val dashboardMode: DashboardAnalyticsMode = DashboardAnalyticsMode.OVERVIEW,
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val availablePeriods: List<String> = emptyList(),
@@ -88,6 +97,11 @@ data class ExtreUiState(
 private data class UiControlState(
     val activeTab: AppTab = AppTab.DASHBOARD,
     val isPrivacyModeEnabled: Boolean = false,
+    val isBiometricLockEnabled: Boolean = false,
+    val isScreenProtectionEnabled: Boolean = true,
+    val lockTimeout: LockTimeout = LockTimeout.IMMEDIATE,
+    val isAppLocked: Boolean = false,
+    val biometricAvailability: BiometricAvailability = BiometricAvailability.AVAILABLE,
     val dashboardMode: DashboardAnalyticsMode = DashboardAnalyticsMode.OVERVIEW,
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val selectedPeriod: String? = null,
@@ -106,10 +120,19 @@ private data class UiControlState(
 )
 
 class ExtreViewModel(
-    private val repository: ExtreRepository
+    private val repository: ExtreRepository,
+    private val securityPreferences: SecurityPreferences? = null
 ) : ViewModel() {
 
-    private val controlState = MutableStateFlow(UiControlState())
+    private val controlState = MutableStateFlow(
+        UiControlState(
+            isPrivacyModeEnabled = securityPreferences?.isPrivacyModeEnabled ?: false,
+            isBiometricLockEnabled = securityPreferences?.isBiometricLockEnabled ?: false,
+            isScreenProtectionEnabled = securityPreferences?.isScreenProtectionEnabled ?: true,
+            lockTimeout = securityPreferences?.lockTimeout ?: LockTimeout.IMMEDIATE,
+            isAppLocked = securityPreferences?.isBiometricLockEnabled ?: false
+        )
+    )
 
     // Cache references to avoid recomputing when underlying data has not changed
     @Volatile private var cachedSnapshot: com.example.extreapp.data.repository.DatabaseSnapshot? = null
@@ -249,6 +272,11 @@ class ExtreViewModel(
         ExtreUiState(
             activeTab = ctrl.activeTab,
             isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
+            isBiometricLockEnabled = ctrl.isBiometricLockEnabled,
+            isScreenProtectionEnabled = ctrl.isScreenProtectionEnabled,
+            lockTimeout = ctrl.lockTimeout,
+            isAppLocked = ctrl.isAppLocked,
+            biometricAvailability = ctrl.biometricAvailability,
             dashboardMode = ctrl.dashboardMode,
             periodFilterMode = ctrl.periodFilterMode,
             availablePeriods = periods,
@@ -286,13 +314,77 @@ class ExtreViewModel(
     .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
-        initialValue = ExtreUiState()
+        initialValue = ExtreUiState(
+            isPrivacyModeEnabled = securityPreferences?.isPrivacyModeEnabled ?: false,
+            isBiometricLockEnabled = securityPreferences?.isBiometricLockEnabled ?: false,
+            isScreenProtectionEnabled = securityPreferences?.isScreenProtectionEnabled ?: true,
+            lockTimeout = securityPreferences?.lockTimeout ?: LockTimeout.IMMEDIATE,
+            isAppLocked = securityPreferences?.isBiometricLockEnabled ?: false
+        )
     )
 
+    private var lastBackgroundEpochMs: Long = 0L
+
     fun togglePrivacyMode() {
+        val next = !controlState.value.isPrivacyModeEnabled
+        securityPreferences?.isPrivacyModeEnabled = next
         controlState.value = controlState.value.copy(
-            isPrivacyModeEnabled = !controlState.value.isPrivacyModeEnabled
+            isPrivacyModeEnabled = next
         )
+    }
+
+    fun setBiometricLockEnabled(enabled: Boolean) {
+        securityPreferences?.isBiometricLockEnabled = enabled
+        controlState.value = controlState.value.copy(
+            isBiometricLockEnabled = enabled,
+            bannerMessage = if (enabled) "Biyometrik kilit aktif edildi." else "Biyometrik kilit kapatıldı."
+        )
+    }
+
+    fun setScreenProtectionEnabled(enabled: Boolean) {
+        securityPreferences?.isScreenProtectionEnabled = enabled
+        controlState.value = controlState.value.copy(
+            isScreenProtectionEnabled = enabled,
+            bannerMessage = if (enabled) "Ekran koruması (FLAG_SECURE) aktif." else "Ekran koruması kapatıldı."
+        )
+    }
+
+    fun setLockTimeout(timeout: LockTimeout) {
+        securityPreferences?.lockTimeout = timeout
+        controlState.value = controlState.value.copy(lockTimeout = timeout)
+    }
+
+    val isAppLocked: Boolean get() = controlState.value.isAppLocked
+    val isPrivacyModeEnabled: Boolean get() = controlState.value.isPrivacyModeEnabled
+    val isScreenProtectionEnabled: Boolean get() = controlState.value.isScreenProtectionEnabled
+    val currentLockTimeout: LockTimeout get() = controlState.value.lockTimeout
+
+    fun setAppLocked(locked: Boolean) {
+        controlState.value = controlState.value.copy(isAppLocked = locked)
+    }
+
+    fun updateBiometricAvailability(availability: BiometricAvailability) {
+        controlState.value = controlState.value.copy(biometricAvailability = availability)
+    }
+
+    fun onAppBackgrounded() {
+        lastBackgroundEpochMs = System.currentTimeMillis()
+    }
+
+    fun onAppForegrounded() {
+        if (controlState.value.isBiometricLockEnabled) {
+            val elapsed = System.currentTimeMillis() - lastBackgroundEpochMs
+            val timeout = controlState.value.lockTimeout.durationMs
+            if (elapsed >= timeout) {
+                controlState.value = controlState.value.copy(isAppLocked = true)
+            }
+        }
+    }
+
+    fun lockAppNow() {
+        if (controlState.value.isBiometricLockEnabled) {
+            controlState.value = controlState.value.copy(isAppLocked = true)
+        }
     }
 
     fun selectTab(tab: AppTab) {
@@ -771,9 +863,11 @@ class ExtreViewModel(
             return object : ViewModelProvider.Factory {
                 @Suppress("UNCHECKED_CAST")
                 override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                    val sqliteHelper = ExtreSqliteHelper(context.applicationContext)
+                    val appContext = context.applicationContext
+                    val sqliteHelper = ExtreSqliteHelper(appContext)
                     val repository = ExtreRepository(sqliteHelper)
-                    return ExtreViewModel(repository) as T
+                    val securityPreferences = SharedPreferencesSecurityPreferences(appContext)
+                    return ExtreViewModel(repository, securityPreferences) as T
                 }
             }
         }
