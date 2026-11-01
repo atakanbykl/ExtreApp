@@ -9,6 +9,7 @@ import androidx.lifecycle.viewModelScope
 import com.example.extreapp.data.local.ExtreSqliteHelper
 import com.example.extreapp.data.local.entity.ApprovalQueueGroup
 import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.LoadedStatementSummary
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
@@ -37,6 +38,7 @@ import kotlinx.coroutines.withContext
 
 enum class AppTab {
     DASHBOARD,
+    STATEMENTS,
     APPROVAL_QUEUE,
     MERCHANTS,
     RULES_AND_BACKUP
@@ -57,6 +59,8 @@ data class ExtreUiState(
     val merchantSummaries: List<MerchantSummaryItem> = emptyList(),
     val selectedMerchantId: Long? = null,
     val selectedMerchantDetail: MerchantDetailData? = null,
+    val statementSearchQuery: String = "",
+    val loadedStatements: List<LoadedStatementSummary> = emptyList(),
     val categories: List<CategoryEntity> = emptyList(),
     val merchants: List<MerchantEntity> = emptyList(),
     val rules: List<RuleEntity> = emptyList(),
@@ -77,6 +81,7 @@ private data class UiControlState(
     val transactionSortOption: TransactionSortOption = TransactionSortOption.DATE_DESC,
     val merchantSearchQuery: String = "",
     val selectedMerchantId: Long? = null,
+    val statementSearchQuery: String = "",
     val pendingWizardTable: RawStatementTable? = null,
     val lastImportReport: StatementImportReport? = null,
     val bannerMessage: String? = null
@@ -99,6 +104,9 @@ class ExtreViewModel(
     @Volatile private var cachedMerchantSummaries: List<MerchantSummaryItem> = emptyList()
     @Volatile private var cachedSelectedMerchantId: Long? = null
     @Volatile private var cachedMerchantDetail: MerchantDetailData? = null
+    @Volatile private var cachedStatements: List<LoadedStatementSummary>? = null
+    @Volatile private var cachedStatementSearch: String = ""
+    @Volatile private var cachedFilteredStatements: List<LoadedStatementSummary> = emptyList()
 
     val uiState: StateFlow<ExtreUiState> = combine(
         repository.snapshot,
@@ -161,6 +169,28 @@ class ExtreViewModel(
             cachedMerchantDetail
         }
 
+        val allStatements = if (snapChanged || cachedStatements == null) {
+            repository.computeLoadedStatements(snap).also { cachedStatements = it }
+        } else {
+            cachedStatements!!
+        }
+
+        val statements = if (snapChanged || ctrl.statementSearchQuery != cachedStatementSearch || cachedFilteredStatements.isEmpty()) {
+            cachedStatementSearch = ctrl.statementSearchQuery
+            val q = ctrl.statementSearchQuery.trim().lowercase()
+            if (q.isEmpty()) {
+                allStatements
+            } else {
+                allStatements.filter {
+                    it.fileName.lowercase().contains(q) ||
+                    it.periodKeys.any { p -> p.contains(q) } ||
+                    it.cardInfos.any { c -> c.lowercase().contains(q) }
+                }
+            }.also { cachedFilteredStatements = it }
+        } else {
+            cachedFilteredStatements
+        }
+
         ExtreUiState(
             activeTab = ctrl.activeTab,
             isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
@@ -176,6 +206,8 @@ class ExtreViewModel(
             merchantSummaries = merchantList,
             selectedMerchantId = ctrl.selectedMerchantId,
             selectedMerchantDetail = merchantDetail,
+            statementSearchQuery = ctrl.statementSearchQuery,
+            loadedStatements = statements,
             categories = snap.categories,
             merchants = snap.merchants,
             rules = snap.rules,
@@ -293,21 +325,6 @@ class ExtreViewModel(
             }.onFailure { err ->
                 controlState.value = controlState.value.copy(
                     bannerMessage = "Ekstre içe aktarma hatası: ${err.localizedMessage ?: "Bilinmeyen hata"}"
-                )
-            }
-        }
-    }
-
-    fun importBundledHesapOzeti(context: Context) {
-        viewModelScope.launch {
-            runCatching {
-                val bytes = withContext(Dispatchers.IO) {
-                    context.assets.open("HESAP_OZETI.csv").use { it.readBytes() }
-                }
-                processRawStatementBytes(bytes, "HESAP_OZETI.csv", context)
-            }.onFailure { err ->
-                controlState.value = controlState.value.copy(
-                    bannerMessage = "Örnek ekstre yüklenemedi: ${err.localizedMessage}"
                 )
             }
         }
@@ -561,6 +578,57 @@ class ExtreViewModel(
                 )
             }
         }
+    }
+
+    fun updateStatementSearch(query: String) {
+        controlState.value = controlState.value.copy(statementSearchQuery = query)
+    }
+
+    fun deleteLoadedStatement(fileName: String) {
+        viewModelScope.launch {
+            val count = repository.deleteStatement(fileName)
+            controlState.value = controlState.value.copy(
+                bannerMessage = "$fileName kaldırıldı ($count işlem silindi)"
+            )
+        }
+    }
+
+    fun renameLoadedStatement(oldFileName: String, newFileName: String) {
+        viewModelScope.launch {
+            val count = repository.renameStatement(oldFileName, newFileName)
+            controlState.value = controlState.value.copy(
+                bannerMessage = "$count işlem için ekstre adı '$newFileName' olarak güncellendi"
+            )
+        }
+    }
+
+    fun reapplyRulesToStatement(fileName: String) {
+        viewModelScope.launch {
+            val count = repository.reapplyRulesToStatement(fileName)
+            controlState.value = controlState.value.copy(
+                bannerMessage = if (count > 0) {
+                    "$fileName için $count işlem yeni kurallarla eşleşti ve onaylandı!"
+                } else {
+                    "$fileName için yeni eşleşen işlem bulunamadı."
+                }
+            )
+        }
+    }
+
+    fun clearAllStatements() {
+        viewModelScope.launch {
+            val count = repository.deleteAllStatements()
+            controlState.value = controlState.value.copy(
+                bannerMessage = "Tüm ekstreler ve $count işlem temizlendi."
+            )
+        }
+    }
+
+    fun jumpToPeriod(periodKey: String) {
+        controlState.value = controlState.value.copy(
+            activeTab = AppTab.DASHBOARD,
+            selectedPeriod = periodKey
+        )
     }
 
     fun clearAllDatabase() {

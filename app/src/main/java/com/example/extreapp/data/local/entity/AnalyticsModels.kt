@@ -72,3 +72,20 @@ data class ApprovalQueueGroup(
     val totalAmount: Double
 )
 
+data class LoadedStatementSummary(
+    val fileName: String,
+    val transactionCount: Int,
+    val periodKeys: List<String>,
+    val primaryPeriod: String,
+    val grossExpenseTotal: Double,
+    val refundTotal: Double,
+    val netExpenseTotal: Double,
+    val paymentTotal: Double,
+    val unapprovedCount: Int,
+    val approvedCount: Int,
+    val cardInfos: List<String>,
+    val minDateEpochDay: Long,
+    val maxDateEpochDay: Long
+)
+
+

@@ -5,6 +5,7 @@ import com.example.extreapp.data.local.ExtrePersistenceStore
 import com.example.extreapp.data.local.entity.ApprovalQueueGroup
 import com.example.extreapp.data.local.entity.CategoryBreakdownItem
 import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.LoadedStatementSummary
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantMonthlyTotal
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
@@ -818,6 +819,124 @@ class ExtreRepository(
             rulesCount = payload.rules.size,
             transactionsCount = payload.transactions.size
         )
+    }
+
+    fun computeLoadedStatements(snap: DatabaseSnapshot = _snapshot.value): List<LoadedStatementSummary> {
+        if (snap.transactions.isEmpty()) return emptyList()
+
+        val grouped = snap.transactions.groupBy {
+            it.sourceFileName.ifBlank { "İçe Aktarılan Ekstre" }
+        }
+
+        return grouped.map { (fileName, txList) ->
+            val expenseTxs = txList.filter { it.type == TransactionType.EXPENSE }
+            val refundTxs = txList.filter { it.type == TransactionType.REFUND }
+            val paymentTxs = txList.filter { it.type == TransactionType.PAYMENT }
+
+            val grossExpense = expenseTxs.sumOf { it.amount }
+            val refundTotal = refundTxs.sumOf { it.amount }
+            val netExpense = (grossExpense - refundTotal).coerceAtLeast(0.0)
+            val paymentTotal = paymentTxs.sumOf { it.amount }
+
+            val unapprovedCount = txList.count { !it.isApproved && (it.type == TransactionType.EXPENSE || it.type == TransactionType.REFUND) }
+            val approvedCount = txList.count { it.isApproved }
+
+            val periodKeys = txList.map { it.statementYearMonth.ifBlank { it.yearMonth } }
+                .distinct()
+                .sortedDescending()
+            val primaryPeriod = periodKeys.firstOrNull() ?: ""
+
+            val cards = txList.mapNotNull { it.cardInfo?.trim()?.takeIf { c -> c.isNotEmpty() } }.distinct()
+            val minDate = txList.minOfOrNull { it.dateEpochDay } ?: 0L
+            val maxDate = txList.maxOfOrNull { it.dateEpochDay } ?: 0L
+
+            LoadedStatementSummary(
+                fileName = fileName,
+                transactionCount = txList.size,
+                periodKeys = periodKeys,
+                primaryPeriod = primaryPeriod,
+                grossExpenseTotal = grossExpense,
+                refundTotal = refundTotal,
+                netExpenseTotal = netExpense,
+                paymentTotal = paymentTotal,
+                unapprovedCount = unapprovedCount,
+                approvedCount = approvedCount,
+                cardInfos = cards,
+                minDateEpochDay = minDate,
+                maxDateEpochDay = maxDate
+            )
+        }.sortedWith(
+            compareByDescending<LoadedStatementSummary> { it.maxDateEpochDay }
+                .thenByDescending { it.transactionCount }
+        )
+    }
+
+    @Synchronized
+    fun deleteStatement(fileName: String): Int {
+        val current = _snapshot.value
+        val toRemove = current.transactions.filter {
+            it.sourceFileName == fileName || (fileName == "İçe Aktarılan Ekstre" && it.sourceFileName.isBlank())
+        }
+        if (toRemove.isEmpty()) return 0
+        val remaining = current.transactions.filter {
+            it.sourceFileName != fileName && !(fileName == "İçe Aktarılan Ekstre" && it.sourceFileName.isBlank())
+        }
+        updateAndPersist(transactions = remaining)
+        return toRemove.size
+    }
+
+    @Synchronized
+    fun renameStatement(oldFileName: String, newFileName: String): Int {
+        val targetName = newFileName.trim()
+        if (targetName.isEmpty() || targetName == oldFileName) return 0
+        val current = _snapshot.value
+        var count = 0
+        val updatedTransactions = current.transactions.map { tx ->
+            val matches = tx.sourceFileName == oldFileName || (oldFileName == "İçe Aktarılan Ekstre" && tx.sourceFileName.isBlank())
+            if (matches) {
+                count++
+                tx.copy(sourceFileName = targetName)
+            } else {
+                tx
+            }
+        }
+        if (count > 0) {
+            updateAndPersist(transactions = updatedTransactions)
+        }
+        return count
+    }
+
+    @Synchronized
+    fun reapplyRulesToStatement(fileName: String): Int {
+        val current = _snapshot.value
+        val isTarget: (TransactionEntity) -> Boolean = { tx ->
+            (tx.sourceFileName == fileName || (fileName == "İçe Aktarılan Ekstre" && tx.sourceFileName.isBlank())) && !tx.isApproved
+        }
+        val targetTxs = current.transactions.filter(isTarget)
+        if (targetTxs.isEmpty()) return 0
+
+        val newlyMatched = ruleEngine.applyRulesToTransactions(
+            transactions = targetTxs,
+            rules = current.rules,
+            overrideAlreadyApproved = false
+        )
+
+        val approvedMap = newlyMatched.filter { it.isApproved }.associateBy { it.id }
+        if (approvedMap.isEmpty()) return 0
+
+        val updatedTransactions = current.transactions.map { tx ->
+            approvedMap[tx.id] ?: tx
+        }
+        updateAndPersist(transactions = updatedTransactions)
+        return approvedMap.size
+    }
+
+    @Synchronized
+    fun deleteAllStatements(): Int {
+        val current = _snapshot.value
+        val count = current.transactions.size
+        updateAndPersist(transactions = emptyList())
+        return count
     }
 }
 

@@ -80,7 +80,6 @@ import java.util.Locale
 fun DashboardScreen(
     uiState: ExtreUiState,
     onPickStatementFile: () -> Unit,
-    onImportSampleHesapOzeti: () -> Unit,
     onSelectPeriod: (String) -> Unit,
     onSelectPeriodMode: (PeriodFilterMode) -> Unit,
     onToggleCategoryFilter: (Long?) -> Unit,
@@ -96,7 +95,6 @@ fun DashboardScreen(
     if (uiState.totalTransactionCount == 0 || overview == null) {
         EmptyDashboardOnboarding(
             onPickStatementFile = onPickStatementFile,
-            onImportSampleHesapOzeti = onImportSampleHesapOzeti,
             modifier = modifier
         )
         return
@@ -462,7 +460,6 @@ fun DashboardScreen(
 @Composable
 private fun EmptyDashboardOnboarding(
     onPickStatementFile: () -> Unit,
-    onImportSampleHesapOzeti: () -> Unit,
     modifier: Modifier = Modifier
 ) {
     Box(
@@ -518,17 +515,6 @@ private fun EmptyDashboardOnboarding(
                     Icon(imageVector = Icons.Outlined.UploadFile, contentDescription = null)
                     Spacer(modifier = Modifier.width(8.dp))
                     Text("Ekstre Dosyası Seç (CSV / XLSX / PDF)")
-                }
-
-                OutlinedButton(
-                    onClick = onImportSampleHesapOzeti,
-                    shape = RoundedCornerShape(16.dp),
-                    modifier = Modifier.fillMaxWidth(),
-                    contentPadding = PaddingValues(vertical = 14.dp)
-                ) {
-                    Icon(imageVector = Icons.Outlined.AutoAwesome, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("HESAP_OZETI.csv Örneğini Yükle")
                 }
             }
         }

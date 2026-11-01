@@ -345,4 +345,35 @@ class ExampleUnitTest {
         currentOption = toggleDate(currentOption)
         assertEquals(TransactionSortOption.DATE_DESC, currentOption)
     }
+
+    @Test
+    fun loadedStatementsManagementTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        // 1. Verify loaded statements summary
+        val statements = repo.computeLoadedStatements()
+        assertEquals(1, statements.size)
+        val stmt = statements.first()
+        assertEquals("HESAP_OZETI.csv", stmt.fileName)
+        assertEquals(parsed.transactions.size, stmt.transactionCount)
+        assertEquals("2026-10", stmt.primaryPeriod)
+        assertTrue(stmt.grossExpenseTotal > 0.0)
+
+        // 2. Test renaming statement
+        val renameCount = repo.renameStatement("HESAP_OZETI.csv", "Ekim_2026_Asil_Kart.csv")
+        assertEquals(stmt.transactionCount, renameCount)
+        val renamedStatements = repo.computeLoadedStatements()
+        assertEquals(1, renamedStatements.size)
+        assertEquals("Ekim_2026_Asil_Kart.csv", renamedStatements.first().fileName)
+
+        // 3. Test deleting statement
+        val deletedCount = repo.deleteStatement("Ekim_2026_Asil_Kart.csv")
+        assertEquals(stmt.transactionCount, deletedCount)
+        val emptyStatements = repo.computeLoadedStatements()
+        assertTrue(emptyStatements.isEmpty())
+        assertTrue(repo.snapshot.value.transactions.isEmpty())
+    }
 }
