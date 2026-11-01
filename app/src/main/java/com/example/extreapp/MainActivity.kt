@@ -27,6 +27,8 @@ import androidx.compose.material.icons.outlined.PendingActions
 import androidx.compose.material.icons.outlined.Rule
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.UploadFile
+import androidx.compose.material.icons.outlined.Visibility
+import androidx.compose.material.icons.outlined.VisibilityOff
 import androidx.compose.material3.Badge
 import androidx.compose.material3.BadgedBox
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -123,6 +125,7 @@ fun ExtreAppRoot() {
     uiState.lastImportReport?.let { report ->
         ImportReportDialog(
             report = report,
+            isPrivacyMode = uiState.isPrivacyModeEnabled,
             onDismiss = { viewModel.dismissImportReport() },
             onOpenApprovalQueue = { viewModel.selectTab(AppTab.APPROVAL_QUEUE) }
         )
@@ -147,6 +150,29 @@ fun ExtreAppRoot() {
                     }
                 },
                 actions = {
+                    // Privacy mode toggle (Hide/Show all currency amounts as ***)
+                    IconButton(
+                        onClick = { viewModel.togglePrivacyMode() }
+                    ) {
+                        Icon(
+                            imageVector = if (uiState.isPrivacyModeEnabled) {
+                                Icons.Outlined.VisibilityOff
+                            } else {
+                                Icons.Outlined.Visibility
+                            },
+                            contentDescription = if (uiState.isPrivacyModeEnabled) {
+                                "Gizlilik Modu Açık (Miktarlar Gizli)"
+                            } else {
+                                "Gizlilik Modu Kapalı (Miktarları Göster)"
+                            },
+                            tint = if (uiState.isPrivacyModeEnabled) {
+                                MaterialTheme.colorScheme.primary
+                            } else {
+                                MaterialTheme.colorScheme.onSurfaceVariant
+                            }
+                        )
+                    }
+
                     // Quick load sample HESAP_OZETI.csv button
                     Surface(
                         shape = RoundedCornerShape(10.dp),

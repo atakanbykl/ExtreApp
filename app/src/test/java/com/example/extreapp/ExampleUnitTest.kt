@@ -221,4 +221,21 @@ class ExampleUnitTest {
         val updatedMerchant = repo.snapshot.value.merchants.first { it.id == updatedRule.merchantId }
         assertEquals("Starbucks Türkiye", updatedMerchant.displayName)
     }
+
+    @Test
+    fun privacyModeMaskingTest() {
+        // Normal formatting
+        val normalTry = com.example.extreapp.ui.theme.Formatters.formatCurrency(1250.50, isMasked = false)
+        assertTrue(normalTry.contains("1.250,50") && normalTry.contains("TL"))
+
+        // Privacy mode formatting (all currency amounts should be masked as ***)
+        val maskedPositive = com.example.extreapp.ui.theme.Formatters.formatCurrency(1250.50, isMasked = true)
+        assertEquals("***", maskedPositive)
+
+        val maskedNegative = com.example.extreapp.ui.theme.Formatters.formatCurrency(-56602.83, isMasked = true)
+        assertEquals("***", maskedNegative)
+
+        val maskedUsd = com.example.extreapp.ui.theme.Formatters.formatCurrency(44.48, currency = "USD", isMasked = true)
+        assertEquals("***", maskedUsd)
+    }
 }

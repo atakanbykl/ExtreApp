@@ -53,6 +53,7 @@ import com.example.extreapp.ui.theme.AppleOrangeLight
 @Composable
 fun ImportReportDialog(
     report: StatementImportReport,
+    isPrivacyMode: Boolean = false,
     onDismiss: () -> Unit,
     onOpenApprovalQueue: () -> Unit
 ) {
@@ -130,7 +131,7 @@ fun ImportReportDialog(
                                 }
                                 report.metadata.statementDebt?.let {
                                     Text(
-                                        text = "Ekstre Borcu: $it",
+                                        text = if (isPrivacyMode) "Ekstre Borcu: ***" else "Ekstre Borcu: $it",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold
                                     )

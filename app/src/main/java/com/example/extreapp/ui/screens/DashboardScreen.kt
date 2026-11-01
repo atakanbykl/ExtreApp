@@ -267,6 +267,7 @@ fun DashboardScreen(
         item {
             MonthlyHeroSummaryCard(
                 overview = overview,
+                isPrivacyMode = uiState.isPrivacyModeEnabled,
                 cardInfo = uiState.latestStatementMetadata?.cardInfo,
                 statementDate = uiState.latestStatementMetadata?.statementDate,
                 selectedCategoryId = uiState.selectedCategoryIdFilter,
@@ -325,6 +326,7 @@ fun DashboardScreen(
         ) { item ->
             CategoryBreakdownRowCard(
                 item = item,
+                isPrivacyMode = uiState.isPrivacyModeEnabled,
                 isSelected = (uiState.selectedCategoryIdFilter == item.category.id),
                 onClick = {
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
@@ -354,6 +356,7 @@ fun DashboardScreen(
         ) { txDetail ->
             TransactionListItemCard(
                 detail = txDetail,
+                isPrivacyMode = uiState.isPrivacyModeEnabled,
                 onClickMerchant = { merchantId ->
                     haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                     onOpenMerchantDetail(merchantId)
@@ -446,6 +449,7 @@ private fun EmptyDashboardOnboarding(
 @Composable
 private fun MonthlyHeroSummaryCard(
     overview: com.example.extreapp.data.local.entity.MonthlyOverviewSummary,
+    isPrivacyMode: Boolean = false,
     cardInfo: String?,
     statementDate: String?,
     selectedCategoryId: Long?,
@@ -506,7 +510,7 @@ private fun MonthlyHeroSummaryCard(
                     )
                     Spacer(modifier = Modifier.height(4.dp))
                     Text(
-                        text = Formatters.formatCurrency(overview.netExpenseTotal),
+                        text = if (isPrivacyMode) "***" else Formatters.formatCurrency(overview.netExpenseTotal),
                         style = MaterialTheme.typography.displayMedium,
                         color = MaterialTheme.colorScheme.onSurface
                     )
@@ -520,7 +524,7 @@ private fun MonthlyHeroSummaryCard(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = Formatters.formatCurrency(overview.grossExpenseTotal),
+                                text = if (isPrivacyMode) "***" else Formatters.formatCurrency(overview.grossExpenseTotal),
                                 style = MaterialTheme.typography.bodyMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -533,7 +537,7 @@ private fun MonthlyHeroSummaryCard(
                                     color = AppleGreenLight
                                 )
                                 Text(
-                                    text = "-${Formatters.formatCurrency(overview.refundTotal)}",
+                                    text = if (isPrivacyMode) "***" else "-${Formatters.formatCurrency(overview.refundTotal)}",
                                     style = MaterialTheme.typography.bodyMedium,
                                     fontWeight = FontWeight.SemiBold,
                                     color = AppleGreenLight
@@ -583,7 +587,7 @@ private fun MonthlyHeroSummaryCard(
                         color = MaterialTheme.colorScheme.onSurfaceVariant
                     )
                     Text(
-                        text = Formatters.formatCurrency(overview.paymentTotal),
+                        text = if (isPrivacyMode) "***" else Formatters.formatCurrency(overview.paymentTotal),
                         style = MaterialTheme.typography.bodyMedium,
                         fontWeight = FontWeight.SemiBold,
                         color = AppleGreenLight
@@ -630,6 +634,7 @@ private fun CategoryDonutChart(
 @Composable
 private fun CategoryBreakdownRowCard(
     item: CategoryBreakdownItem,
+    isPrivacyMode: Boolean = false,
     isSelected: Boolean,
     onClick: () -> Unit
 ) {
@@ -698,7 +703,11 @@ private fun CategoryBreakdownRowCard(
                                 append("${item.transactionCount} işlem • %")
                                 append(String.format(Locale.forLanguageTag("tr-TR"), "%.1f", item.percentageOfTotal))
                                 if (item.refundTotal > 0.0) {
-                                    append(" (${Formatters.formatCurrency(item.refundTotal)} iade düşüldü)")
+                                    if (isPrivacyMode) {
+                                        append(" (*** iade)")
+                                    } else {
+                                        append(" (${Formatters.formatCurrency(item.refundTotal)} iade düşüldü)")
+                                    }
                                 }
                             },
                             style = MaterialTheme.typography.bodyMedium,
@@ -708,7 +717,7 @@ private fun CategoryBreakdownRowCard(
                 }
 
                 Text(
-                    text = Formatters.formatCurrency(item.netExpense),
+                    text = if (isPrivacyMode) "***" else Formatters.formatCurrency(item.netExpense),
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold
                 )
@@ -731,6 +740,7 @@ private fun CategoryBreakdownRowCard(
 @Composable
 fun TransactionListItemCard(
     detail: TransactionWithDetails,
+    isPrivacyMode: Boolean = false,
     onClickMerchant: (Long) -> Unit,
     onClickUnapproved: () -> Unit
 ) {
@@ -821,7 +831,10 @@ fun TransactionListItemCard(
                         }
 
                         tx.foreignCurrencyNote?.let { fx ->
-                            BadgePill(text = fx, color = MaterialTheme.colorScheme.secondary)
+                            BadgePill(
+                                text = if (isPrivacyMode) "***" else fx,
+                                color = MaterialTheme.colorScheme.secondary
+                            )
                         }
 
                         if (tx.type == TransactionType.REFUND) {
@@ -843,14 +856,14 @@ fun TransactionListItemCard(
                 }
                 val prefix = if (tx.type == TransactionType.REFUND || tx.type == TransactionType.PAYMENT) "-" else ""
                 Text(
-                    text = "$prefix${Formatters.formatCurrency(tx.amount, tx.currency)}",
+                    text = if (isPrivacyMode) "***" else "$prefix${Formatters.formatCurrency(tx.amount, tx.currency)}",
                     style = MaterialTheme.typography.titleMedium,
                     fontWeight = FontWeight.Bold,
                     color = amountColor
                 )
                 tx.rewardPointsText?.let { reward ->
                     Text(
-                        text = "+$reward Chip",
+                        text = if (isPrivacyMode) "+*** Chip" else "+$reward Chip",
                         style = MaterialTheme.typography.labelSmall,
                         color = AppleGreenLight
                     )

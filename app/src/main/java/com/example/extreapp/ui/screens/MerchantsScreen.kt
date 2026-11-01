@@ -78,6 +78,7 @@ fun MerchantsScreen(
     if (detail != null) {
         MerchantDetailAnalyticsScreen(
             detail = detail,
+            isPrivacyMode = uiState.isPrivacyModeEnabled,
             onBack = onBackFromDetail,
             onAddKeyword = { keyword ->
                 val catId = detail.summary.category?.id
@@ -171,7 +172,7 @@ fun MerchantsScreen(
                             color = MaterialTheme.colorScheme.onSurfaceVariant
                         )
                         Text(
-                            text = "Toplam: ${Formatters.formatCurrency(totalSpendAllMerchants)}",
+                            text = "Toplam: ${if (uiState.isPrivacyModeEnabled) "***" else Formatters.formatCurrency(totalSpendAllMerchants)}",
                             style = MaterialTheme.typography.titleMedium,
                             fontWeight = FontWeight.Bold
                         )
@@ -184,6 +185,7 @@ fun MerchantsScreen(
                 ) { item ->
                     MerchantSummaryRowCard(
                         item = item,
+                        isPrivacyMode = uiState.isPrivacyModeEnabled,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
                             onSelectMerchant(item.merchant.id)
@@ -198,6 +200,7 @@ fun MerchantsScreen(
 @Composable
 private fun MerchantSummaryRowCard(
     item: MerchantSummaryItem,
+    isPrivacyMode: Boolean = false,
     onClick: () -> Unit
 ) {
     val catColor = item.category?.let { Color.fromHex(it.colorHex) } ?: MaterialTheme.colorScheme.primary
@@ -273,13 +276,13 @@ private fun MerchantSummaryRowCard(
             ) {
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
-                        text = Formatters.formatCurrency(item.netSpend),
+                        text = if (isPrivacyMode) "***" else Formatters.formatCurrency(item.netSpend),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold
                     )
                     if (item.refundTotal > 0.0) {
                         Text(
-                            text = "-${Formatters.formatCurrency(item.refundTotal)} iade",
+                            text = if (isPrivacyMode) "***" else "-${Formatters.formatCurrency(item.refundTotal)} iade",
                             style = MaterialTheme.typography.labelSmall,
                             color = AppleGreenLight
                         )
@@ -300,6 +303,7 @@ private fun MerchantSummaryRowCard(
 @Composable
 private fun MerchantDetailAnalyticsScreen(
     detail: MerchantDetailData,
+    isPrivacyMode: Boolean = false,
     onBack: () -> Unit,
     onAddKeyword: (String) -> Unit,
     modifier: Modifier = Modifier
@@ -373,7 +377,7 @@ private fun MerchantDetailAnalyticsScreen(
                             )
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
-                                text = Formatters.formatCurrency(summary.netSpend),
+                                text = if (isPrivacyMode) "***" else Formatters.formatCurrency(summary.netSpend),
                                 style = MaterialTheme.typography.displayMedium
                             )
                         }
@@ -406,7 +410,7 @@ private fun MerchantDetailAnalyticsScreen(
                                 color = MaterialTheme.colorScheme.onSurfaceVariant
                             )
                             Text(
-                                text = Formatters.formatCurrency(monthlyAvg),
+                                text = if (isPrivacyMode) "***" else Formatters.formatCurrency(monthlyAvg),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.SemiBold
                             )
@@ -444,7 +448,8 @@ private fun MerchantDetailAnalyticsScreen(
         item {
             MerchantMonthlySpendChartCard(
                 monthlyTotals = detail.monthlyTotals,
-                barColor = catColor
+                barColor = catColor,
+                isPrivacyMode = isPrivacyMode
             )
         }
 
@@ -555,6 +560,7 @@ private fun MerchantDetailAnalyticsScreen(
         ) { txDetail ->
             TransactionListItemCard(
                 detail = txDetail,
+                isPrivacyMode = isPrivacyMode,
                 onClickMerchant = {},
                 onClickUnapproved = {}
             )
@@ -565,7 +571,8 @@ private fun MerchantDetailAnalyticsScreen(
 @Composable
 private fun MerchantMonthlySpendChartCard(
     monthlyTotals: List<MerchantMonthlyTotal>,
-    barColor: Color
+    barColor: Color,
+    isPrivacyMode: Boolean = false
 ) {
     Card(
         shape = RoundedCornerShape(22.dp),
@@ -626,7 +633,7 @@ private fun MerchantMonthlySpendChartCard(
                                 .fillMaxHeight()
                         ) {
                             Text(
-                                text = Formatters.formatCurrency(monthItem.netSpend).replace(" TL", ""),
+                                text = if (isPrivacyMode) "***" else Formatters.formatCurrency(monthItem.netSpend).replace(" TL", ""),
                                 style = MaterialTheme.typography.labelSmall,
                                 fontWeight = FontWeight.SemiBold,
                                 maxLines = 1
@@ -668,7 +675,11 @@ private fun MerchantMonthlySpendChartCard(
                                     text = buildString {
                                         append("${m.transactionCount} işlem")
                                         if (m.refundTotal > 0.0) {
-                                            append(" • ${Formatters.formatCurrency(m.refundTotal)} iade düşüldü")
+                                            if (isPrivacyMode) {
+                                                append(" • *** iade düşüldü")
+                                            } else {
+                                                append(" • ${Formatters.formatCurrency(m.refundTotal)} iade düşüldü")
+                                            }
                                         }
                                     },
                                     style = MaterialTheme.typography.bodyMedium,
@@ -676,7 +687,7 @@ private fun MerchantMonthlySpendChartCard(
                                 )
                             }
                             Text(
-                                text = Formatters.formatCurrency(m.netSpend),
+                                text = if (isPrivacyMode) "***" else Formatters.formatCurrency(m.netSpend),
                                 style = MaterialTheme.typography.titleMedium,
                                 fontWeight = FontWeight.Bold
                             )

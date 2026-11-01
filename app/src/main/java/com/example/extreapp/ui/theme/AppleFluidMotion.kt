@@ -99,7 +99,13 @@ object Formatters {
         "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"
     )
 
-    fun formatCurrency(amount: Double, currency: String = "TRY", showSign: Boolean = false): String {
+    fun formatCurrency(
+        amount: Double,
+        currency: String = "TRY",
+        showSign: Boolean = false,
+        isMasked: Boolean = false
+    ): String {
+        if (isMasked) return "***"
         val symbol = when (currency.uppercase(Locale.ROOT)) {
             "USD" -> "$"
             "EUR" -> "€"

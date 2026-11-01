@@ -43,6 +43,7 @@ enum class AppTab {
 
 data class ExtreUiState(
     val activeTab: AppTab = AppTab.DASHBOARD,
+    val isPrivacyModeEnabled: Boolean = false,
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val availablePeriods: List<String> = emptyList(),
     val selectedPeriod: String = "2026-10",
@@ -67,6 +68,7 @@ data class ExtreUiState(
 
 private data class UiControlState(
     val activeTab: AppTab = AppTab.DASHBOARD,
+    val isPrivacyModeEnabled: Boolean = false,
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val selectedPeriod: String? = null,
     val selectedCategoryIdFilter: Long? = null,
@@ -158,6 +160,7 @@ class ExtreViewModel(
 
         ExtreUiState(
             activeTab = ctrl.activeTab,
+            isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
             periodFilterMode = ctrl.periodFilterMode,
             availablePeriods = periods,
             selectedPeriod = effectivePeriod,
@@ -186,6 +189,12 @@ class ExtreViewModel(
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ExtreUiState()
     )
+
+    fun togglePrivacyMode() {
+        controlState.value = controlState.value.copy(
+            isPrivacyModeEnabled = !controlState.value.isPrivacyModeEnabled
+        )
+    }
 
     fun selectTab(tab: AppTab) {
         controlState.value = controlState.value.copy(

@@ -170,6 +170,7 @@ fun ApprovalQueueScreen(
         ) { group ->
             ApprovalQueueGroupCard(
                 group = group,
+                isPrivacyMode = uiState.isPrivacyModeEnabled,
                 categories = uiState.categories,
                 existingMerchants = uiState.merchants,
                 onApprove = { keyword, merchantName, categoryId ->
@@ -184,6 +185,7 @@ fun ApprovalQueueScreen(
 @Composable
 private fun ApprovalQueueGroupCard(
     group: ApprovalQueueGroup,
+    isPrivacyMode: Boolean = false,
     categories: List<CategoryEntity>,
     existingMerchants: List<MerchantEntity>,
     onApprove: (keyword: String, merchantName: String, categoryId: Long) -> Unit
@@ -246,7 +248,7 @@ private fun ApprovalQueueGroupCard(
                 Spacer(modifier = Modifier.width(8.dp))
 
                 Text(
-                    text = Formatters.formatCurrency(group.totalAmount, showSign = group.totalAmount < 0),
+                    text = if (isPrivacyMode) "***" else Formatters.formatCurrency(group.totalAmount, showSign = group.totalAmount < 0),
                     style = MaterialTheme.typography.titleLarge,
                     fontWeight = FontWeight.Bold,
                     color = if (group.totalAmount < 0) AppleGreenLight else MaterialTheme.colorScheme.onSurface
@@ -305,7 +307,7 @@ private fun ApprovalQueueGroupCard(
                                     Spacer(modifier = Modifier.width(8.dp))
                                     val sign = if (tx.type == TransactionType.REFUND) "-" else ""
                                     Text(
-                                        text = "$sign${Formatters.formatCurrency(tx.amount)}",
+                                        text = if (isPrivacyMode) "***" else "$sign${Formatters.formatCurrency(tx.amount)}",
                                         style = MaterialTheme.typography.bodyMedium,
                                         fontWeight = FontWeight.SemiBold,
                                         color = if (tx.type == TransactionType.REFUND) AppleGreenLight else MaterialTheme.colorScheme.onSurface
