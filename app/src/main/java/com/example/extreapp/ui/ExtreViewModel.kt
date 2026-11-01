@@ -12,6 +12,7 @@ import com.example.extreapp.data.local.entity.CategoryEntity
 import com.example.extreapp.data.local.entity.LoadedStatementSummary
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
+import com.example.extreapp.data.local.entity.MonthOverMonthComparison
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.RuleEntity
@@ -53,6 +54,9 @@ data class ExtreUiState(
     val selectedCategoryIdFilter: Long? = null,
     val transactionSortOption: TransactionSortOption = TransactionSortOption.DATE_DESC,
     val monthlyOverview: MonthlyOverviewSummary? = null,
+    val isComparisonModeActive: Boolean = false,
+    val comparisonTargetPeriod: String? = null,
+    val monthOverMonthComparison: MonthOverMonthComparison? = null,
     val approvalQueueGroups: List<ApprovalQueueGroup> = emptyList(),
     val unapprovedTotalCount: Int = 0,
     val merchantSearchQuery: String = "",
@@ -79,6 +83,8 @@ private data class UiControlState(
     val selectedPeriod: String? = null,
     val selectedCategoryIdFilter: Long? = null,
     val transactionSortOption: TransactionSortOption = TransactionSortOption.DATE_DESC,
+    val isComparisonModeActive: Boolean = false,
+    val comparisonTargetPeriod: String? = null,
     val merchantSearchQuery: String = "",
     val selectedMerchantId: Long? = null,
     val statementSearchQuery: String = "",
@@ -191,6 +197,25 @@ class ExtreViewModel(
             cachedFilteredStatements
         }
 
+        val effectiveTargetPeriod = if (ctrl.isComparisonModeActive) {
+            val otherPeriods = periods.filter { it != effectivePeriod }
+            ctrl.comparisonTargetPeriod?.takeIf { it in otherPeriods }
+                ?: otherPeriods.firstOrNull()
+        } else {
+            null
+        }
+
+        val comparison = if (ctrl.isComparisonModeActive && effectiveTargetPeriod != null) {
+            repository.computeMonthOverMonthComparison(
+                basePeriodKey = effectivePeriod,
+                targetPeriodKey = effectiveTargetPeriod,
+                filterMode = ctrl.periodFilterMode,
+                snap = snap
+            )
+        } else {
+            null
+        }
+
         ExtreUiState(
             activeTab = ctrl.activeTab,
             isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
@@ -200,6 +225,9 @@ class ExtreViewModel(
             selectedCategoryIdFilter = ctrl.selectedCategoryIdFilter,
             transactionSortOption = ctrl.transactionSortOption,
             monthlyOverview = overview,
+            isComparisonModeActive = ctrl.isComparisonModeActive,
+            comparisonTargetPeriod = effectiveTargetPeriod,
+            monthOverMonthComparison = comparison,
             approvalQueueGroups = queueGroups,
             unapprovedTotalCount = overview.unapprovedCount,
             merchantSearchQuery = ctrl.merchantSearchQuery,
@@ -244,6 +272,29 @@ class ExtreViewModel(
             selectedPeriod = periodKey,
             selectedCategoryIdFilter = null
         )
+    }
+
+    fun toggleComparisonMode() {
+        controlState.value = controlState.value.copy(
+            isComparisonModeActive = !controlState.value.isComparisonModeActive
+        )
+    }
+
+    fun setComparisonTargetPeriod(targetPeriodKey: String) {
+        controlState.value = controlState.value.copy(
+            comparisonTargetPeriod = targetPeriodKey
+        )
+    }
+
+    fun swapComparisonPeriods() {
+        val currentBase = controlState.value.selectedPeriod ?: uiState.value.selectedPeriod
+        val currentTarget = uiState.value.comparisonTargetPeriod
+        if (currentTarget != null) {
+            controlState.value = controlState.value.copy(
+                selectedPeriod = currentTarget,
+                comparisonTargetPeriod = currentBase
+            )
+        }
     }
 
     fun setPeriodFilterMode(mode: PeriodFilterMode) {

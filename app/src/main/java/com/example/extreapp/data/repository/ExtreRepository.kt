@@ -4,11 +4,13 @@ import com.example.extreapp.data.local.DefaultCategories
 import com.example.extreapp.data.local.ExtrePersistenceStore
 import com.example.extreapp.data.local.entity.ApprovalQueueGroup
 import com.example.extreapp.data.local.entity.CategoryBreakdownItem
+import com.example.extreapp.data.local.entity.CategoryComparisonItem
 import com.example.extreapp.data.local.entity.CategoryEntity
 import com.example.extreapp.data.local.entity.LoadedStatementSummary
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantMonthlyTotal
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
+import com.example.extreapp.data.local.entity.MonthOverMonthComparison
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.RuleEntity
@@ -664,6 +666,95 @@ class ExtreRepository(
             unapprovedCount = unapprovedTotalCount,
             categoryBreakdowns = finalBreakdown,
             transactions = detailedTransactions
+        )
+    }
+
+    fun computeMonthOverMonthComparison(
+        basePeriodKey: String,
+        targetPeriodKey: String,
+        filterMode: PeriodFilterMode,
+        snap: DatabaseSnapshot = _snapshot.value
+    ): MonthOverMonthComparison {
+        val baseOverview = computeMonthlyOverview(basePeriodKey, filterMode, snap)
+        val targetOverview = computeMonthlyOverview(targetPeriodKey, filterMode, snap)
+
+        val baseCatMap = baseOverview.categoryBreakdowns.associateBy { it.category.id }
+        val targetCatMap = targetOverview.categoryBreakdowns.associateBy { it.category.id }
+
+        val allCatIds = (baseCatMap.keys + targetCatMap.keys).distinct()
+        val allCategoriesById = snap.categories.associateBy { it.id }.toMutableMap()
+        val uncategorizedFallback = CategoryEntity(
+            id = -1L,
+            name = "Onay Bekleyen / Tanımsız",
+            iconName = "HelpOutline",
+            colorHex = 0xFF94A3B8,
+            isDefault = false
+        )
+        allCategoriesById[-1L] = uncategorizedFallback
+
+        val categoryComparisons = allCatIds.mapNotNull { catId ->
+            val baseItem = baseCatMap[catId]
+            val targetItem = targetCatMap[catId]
+            val category = baseItem?.category ?: targetItem?.category ?: allCategoriesById[catId] ?: return@mapNotNull null
+
+            val baseNet = baseItem?.netExpense ?: 0.0
+            val targetNet = targetItem?.netExpense ?: 0.0
+            val diff = baseNet - targetNet
+            val pct = if (targetNet > 0.0) {
+                ((diff / targetNet) * 100.0)
+            } else if (baseNet > 0.0) {
+                null // Önceki ayda hiç harcama yoktu (Yeni harcama)
+            } else {
+                0.0
+            }
+
+            CategoryComparisonItem(
+                category = category,
+                baseNetExpense = baseNet,
+                targetNetExpense = targetNet,
+                diffAmount = diff,
+                percentageChange = pct,
+                baseTransactionCount = baseItem?.transactionCount ?: 0,
+                targetTransactionCount = targetItem?.transactionCount ?: 0
+            )
+        }.sortedWith(
+            compareByDescending<CategoryComparisonItem> { kotlin.math.abs(it.diffAmount) }
+                .thenByDescending { it.baseNetExpense }
+        )
+
+        val netDiff = baseOverview.netExpenseTotal - targetOverview.netExpenseTotal
+        val netPct = if (targetOverview.netExpenseTotal > 0.0) {
+            ((netDiff / targetOverview.netExpenseTotal) * 100.0)
+        } else if (baseOverview.netExpenseTotal > 0.0) {
+            null
+        } else {
+            0.0
+        }
+
+        val topIncreased = categoryComparisons.filter { it.diffAmount > 0.01 }
+            .maxByOrNull { it.diffAmount }
+        val topDecreased = categoryComparisons.filter { it.diffAmount < -0.01 }
+            .minByOrNull { it.diffAmount }
+
+        return MonthOverMonthComparison(
+            basePeriodKey = basePeriodKey,
+            targetPeriodKey = targetPeriodKey,
+            filterMode = filterMode,
+            baseNetExpense = baseOverview.netExpenseTotal,
+            targetNetExpense = targetOverview.netExpenseTotal,
+            netExpenseDiff = netDiff,
+            netExpensePercentageChange = netPct,
+            baseGrossExpense = baseOverview.grossExpenseTotal,
+            targetGrossExpense = targetOverview.grossExpenseTotal,
+            baseRefundTotal = baseOverview.refundTotal,
+            targetRefundTotal = targetOverview.refundTotal,
+            basePaymentTotal = baseOverview.paymentTotal,
+            targetPaymentTotal = targetOverview.paymentTotal,
+            baseTransactionCount = baseOverview.transactions.size,
+            targetTransactionCount = targetOverview.transactions.size,
+            categoryComparisons = categoryComparisons,
+            topIncreasedCategory = topIncreased,
+            topDecreasedCategory = topDecreased
         )
     }
 

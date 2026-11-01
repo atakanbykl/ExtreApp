@@ -88,4 +88,36 @@ data class LoadedStatementSummary(
     val maxDateEpochDay: Long
 )
 
+data class CategoryComparisonItem(
+    val category: CategoryEntity,
+    val baseNetExpense: Double,
+    val targetNetExpense: Double,
+    val diffAmount: Double,                     // base - target (pozitif ise artış, negatif ise azalış/tasarruf)
+    val percentageChange: Double?,              // null if targetNetExpense == 0.0
+    val baseTransactionCount: Int,
+    val targetTransactionCount: Int
+)
+
+data class MonthOverMonthComparison(
+    val basePeriodKey: String,                 // "2026-10"
+    val targetPeriodKey: String,               // "2026-09"
+    val filterMode: PeriodFilterMode,
+    val baseNetExpense: Double,
+    val targetNetExpense: Double,
+    val netExpenseDiff: Double,                // base - target
+    val netExpensePercentageChange: Double?,
+    val baseGrossExpense: Double,
+    val targetGrossExpense: Double,
+    val baseRefundTotal: Double,
+    val targetRefundTotal: Double,
+    val basePaymentTotal: Double,
+    val targetPaymentTotal: Double,
+    val baseTransactionCount: Int,
+    val targetTransactionCount: Int,
+    val categoryComparisons: List<CategoryComparisonItem>,
+    val topIncreasedCategory: CategoryComparisonItem?,
+    val topDecreasedCategory: CategoryComparisonItem?
+)
+
+
 

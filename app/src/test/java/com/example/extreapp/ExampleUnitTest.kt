@@ -376,4 +376,40 @@ class ExampleUnitTest {
         assertTrue(emptyStatements.isEmpty())
         assertTrue(repo.snapshot.value.transactions.isEmpty())
     }
+
+    @Test
+    fun monthOverMonthComparisonTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        // Approve Amazon to establish categorized transactions
+        repo.approveAndCreateRule(
+            keyword = "AMAZON.COM",
+            merchantDisplayName = "Amazon",
+            categoryId = 4L, // E-Ticaret & Alışveriş
+            priority = 10
+        )
+
+        val availablePeriods = repo.getAvailablePeriods(PeriodFilterMode.TRANSACTION_MONTH)
+        assertTrue(availablePeriods.size >= 2)
+        val basePeriod = availablePeriods[0]
+        val targetPeriod = availablePeriods[1]
+
+        val comparison = repo.computeMonthOverMonthComparison(
+            basePeriodKey = basePeriod,
+            targetPeriodKey = targetPeriod,
+            filterMode = PeriodFilterMode.TRANSACTION_MONTH
+        )
+
+        assertEquals(basePeriod, comparison.basePeriodKey)
+        assertEquals(targetPeriod, comparison.targetPeriodKey)
+        assertEquals(comparison.baseNetExpense - comparison.targetNetExpense, comparison.netExpenseDiff, 0.01)
+        assertTrue(comparison.categoryComparisons.isNotEmpty())
+
+        val amazonCmp = comparison.categoryComparisons.firstOrNull { it.category.id == 4L }
+        assertNotNull(amazonCmp)
+        assertEquals(amazonCmp!!.baseNetExpense - amazonCmp.targetNetExpense, amazonCmp.diffAmount, 0.01)
+    }
 }
