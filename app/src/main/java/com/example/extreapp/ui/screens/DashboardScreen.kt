@@ -9,6 +9,8 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.ExperimentalLayoutApi
+import androidx.compose.foundation.layout.FlowRow
 import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
@@ -725,6 +727,7 @@ private fun CategoryBreakdownRowCard(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 fun TransactionListItemCard(
     detail: TransactionWithDetails,
@@ -773,7 +776,7 @@ fun TransactionListItemCard(
                     )
                 }
 
-                Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
                         text = detail.merchant?.displayName ?: tx.cleanedDescription.ifEmpty { tx.rawDescription },
                         style = MaterialTheme.typography.titleMedium,
@@ -791,9 +794,10 @@ fun TransactionListItemCard(
                         )
                     }
 
-                    Row(
+                    FlowRow(
                         horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically
                     ) {
                         Text(
                             text = Formatters.formatEpochDay(tx.dateEpochDay),

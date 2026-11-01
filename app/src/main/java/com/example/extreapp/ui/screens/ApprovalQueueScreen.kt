@@ -369,26 +369,26 @@ private fun ApprovalQueueGroupCard(
                 }
             }
 
-            // Merchant Name & Rule Keyword TextFields
-            Row(
+            // Merchant Name & Rule Keyword TextFields (Stacked vertically for clean readability)
+            Column(
                 modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.spacedBy(10.dp)
+                verticalArrangement = Arrangement.spacedBy(10.dp)
             ) {
                 OutlinedTextField(
                     value = merchantName,
                     onValueChange = { merchantName = it },
-                    label = { Text("Satıcı Adı") },
+                    label = { Text("Atanacak Satıcı Adı") },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.fillMaxWidth()
                 )
                 OutlinedTextField(
                     value = keyword,
                     onValueChange = { keyword = it },
-                    label = { Text("Eşleme Kelimesi") },
+                    label = { Text("Eşleştirme Anahtar Kelimesi (Contains)") },
                     singleLine = true,
                     shape = RoundedCornerShape(14.dp),
-                    modifier = Modifier.weight(1f)
+                    modifier = Modifier.fillMaxWidth()
                 )
             }
 
