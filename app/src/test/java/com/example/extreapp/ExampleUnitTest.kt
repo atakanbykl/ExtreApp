@@ -412,4 +412,76 @@ class ExampleUnitTest {
         assertNotNull(amazonCmp)
         assertEquals(amazonCmp!!.baseNetExpense - amazonCmp.targetNetExpense, amazonCmp.diffAmount, 0.01)
     }
+
+    @Test
+    fun installmentCashflowProjectionTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        // 1. Verify Date Math Helpers
+        assertEquals("2026-11", ExtreRepository.addMonthsToYearMonth("2026-10", 1))
+        assertEquals("2027-01", ExtreRepository.addMonthsToYearMonth("2026-10", 3))
+        assertEquals(1, ExtreRepository.monthsBetween("2026-09", "2026-10"))
+        assertEquals(0, ExtreRepository.monthsBetween("2026-10", "2026-10"))
+        assertEquals("Kasım 2026", ExtreRepository.formatYearMonthTurkish("2026-11"))
+        assertEquals("Şubat 2027", ExtreRepository.formatYearMonthTurkish("2027-02"))
+
+        // 2. Compute Installment Cashflow Projection
+        val projection = repo.computeInstallmentProjection()
+
+        assertEquals("2026-10", projection.baseStatementYearMonth)
+        assertEquals(7, projection.totalActivePlansCount)
+        assertEquals(1, projection.completedPlans.size)
+        assertEquals("2027-02", projection.maxEndYearMonth)
+
+        // 3. Verify Completed Plan (Bridgestone 06/06)
+        val completedPlan = projection.completedPlans.first()
+        assertTrue(completedPlan.isCompleted)
+        assertEquals(6, completedPlan.latestCurrentInstallment)
+        assertEquals(6, completedPlan.totalInstallments)
+        assertEquals(0, completedPlan.remainingInstallments)
+        assertEquals(3166.66, completedPlan.monthlyAmount, 0.01)
+
+        // 4. Verify Future Monthly Forecasts (4 months: 2026-11 to 2027-02)
+        assertEquals(4, projection.monthlyForecasts.size)
+        val nov = projection.monthlyForecasts[0]
+        val dec = projection.monthlyForecasts[1]
+        val jan = projection.monthlyForecasts[2]
+        val feb = projection.monthlyForecasts[3]
+
+        assertEquals("2026-11", nov.yearMonth)
+        assertEquals("Kasım 2026", nov.monthLabel)
+        assertEquals(9093.73, nov.netInstallmentCommitment, 0.05)
+        assertEquals(966.50, nov.refundInstallmentTotal, 0.01)
+        assertEquals(7, nov.activePlansCount)
+
+        assertEquals("2026-12", dec.yearMonth)
+        assertEquals(9093.73, dec.netInstallmentCommitment, 0.05)
+        assertEquals(7, dec.activePlansCount)
+
+        // In January 2027, both Ajet flight plans have ended (last in Dec 2026)
+        assertEquals("2027-01", jan.yearMonth)
+        assertEquals(7079.59, jan.netInstallmentCommitment, 0.05)
+        assertEquals(5, jan.activePlansCount)
+
+        // In February 2027, Hepsiburada 4.2k plan has ended (last in Jan 2027)
+        assertEquals("2027-02", feb.yearMonth)
+        assertEquals(2885.26, feb.netInstallmentCommitment, 0.05)
+        assertEquals(4, feb.activePlansCount)
+
+        // 5. Total Future Debt commitment (9093.73 + 9093.73 + 7079.59 + 2885.26 = 28152.31)
+        assertEquals(28152.31, projection.totalFutureDebt, 0.10)
+        assertEquals(9093.73, projection.nextMonthCommitment, 0.05)
+
+        // 6. Verify Active Plans details (Amazon refund plan should be recognized as REFUND)
+        val refundPlan = projection.activePlans.firstOrNull { it.type == TransactionType.REFUND }
+        assertNotNull(refundPlan)
+        assertEquals(966.50, refundPlan!!.monthlyAmount, 0.01)
+        assertEquals(2, refundPlan.latestCurrentInstallment)
+        assertEquals(6, refundPlan.totalInstallments)
+        assertEquals(4, refundPlan.remainingInstallments)
+        assertEquals("2027-02", refundPlan.endYearMonth)
+    }
 }

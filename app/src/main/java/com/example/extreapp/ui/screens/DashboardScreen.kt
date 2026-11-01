@@ -34,11 +34,14 @@ import androidx.compose.material.icons.outlined.AddCircleOutline
 import androidx.compose.material.icons.outlined.ArrowDownward
 import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.CheckCircle
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material.icons.outlined.FilterAltOff
 import androidx.compose.material.icons.outlined.PendingActions
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.Button
@@ -69,9 +72,13 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import com.example.extreapp.data.local.entity.ActiveInstallmentPlan
 import com.example.extreapp.data.local.entity.CategoryBreakdownItem
 import com.example.extreapp.data.local.entity.CategoryComparisonItem
+import com.example.extreapp.data.local.entity.DashboardAnalyticsMode
+import com.example.extreapp.data.local.entity.InstallmentCashflowProjection
 import com.example.extreapp.data.local.entity.MonthOverMonthComparison
+import com.example.extreapp.data.local.entity.MonthlyInstallmentForecast
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.TransactionSortOption
 import com.example.extreapp.data.local.entity.TransactionType
@@ -96,6 +103,8 @@ fun DashboardScreen(
     onToggleSortByDate: () -> Unit = {},
     onToggleSortByAmount: () -> Unit = {},
     onToggleComparisonMode: () -> Unit = {},
+    onSelectDashboardMode: (DashboardAnalyticsMode) -> Unit = {},
+    onSelectForecastMonth: (String?) -> Unit = {},
     onSelectComparisonTarget: (String) -> Unit = {},
     onSwapComparisonPeriods: () -> Unit = {},
     onOpenApprovalQueue: () -> Unit,
@@ -230,18 +239,20 @@ fun DashboardScreen(
                     }
                 }
 
-                // Mode switcher: "Dönem Özeti" vs "Aydan Aya Kıyasla"
+                // Mode switcher: "Dönem Özeti" vs "Aydan Aya Kıyasla" vs "Taksit Takvimi"
                 Row(
-                    modifier = Modifier.fillMaxWidth(),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
                     horizontalArrangement = Arrangement.spacedBy(8.dp),
                     verticalAlignment = Alignment.CenterVertically
                 ) {
                     FilterChip(
-                        selected = !uiState.isComparisonModeActive,
+                        selected = uiState.dashboardMode == DashboardAnalyticsMode.OVERVIEW,
                         onClick = {
-                            if (uiState.isComparisonModeActive) {
+                            if (uiState.dashboardMode != DashboardAnalyticsMode.OVERVIEW) {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onToggleComparisonMode()
+                                onSelectDashboardMode(DashboardAnalyticsMode.OVERVIEW)
                             }
                         },
                         leadingIcon = {
@@ -255,11 +266,11 @@ fun DashboardScreen(
                     )
 
                     FilterChip(
-                        selected = uiState.isComparisonModeActive,
+                        selected = uiState.dashboardMode == DashboardAnalyticsMode.COMPARISON,
                         onClick = {
-                            if (!uiState.isComparisonModeActive) {
+                            if (uiState.dashboardMode != DashboardAnalyticsMode.COMPARISON) {
                                 haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                                onToggleComparisonMode()
+                                onSelectDashboardMode(DashboardAnalyticsMode.COMPARISON)
                             }
                         },
                         leadingIcon = {
@@ -271,68 +282,197 @@ fun DashboardScreen(
                         },
                         label = { Text("Aydan Aya Kıyasla") }
                     )
+
+                    FilterChip(
+                        selected = uiState.dashboardMode == DashboardAnalyticsMode.INSTALLMENTS,
+                        onClick = {
+                            if (uiState.dashboardMode != DashboardAnalyticsMode.INSTALLMENTS) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectDashboardMode(DashboardAnalyticsMode.INSTALLMENTS)
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.CalendarMonth,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = { Text("Taksit Takvimi") }
+                    )
                 }
             }
         }
 
-        if (uiState.isComparisonModeActive) {
-            val comparison = uiState.monthOverMonthComparison
-            if (comparison != null) {
-                // 1. Comparison Period Selector & Swap Bar
-                item {
-                    MonthOverMonthPeriodSelectorBar(
-                        comparison = comparison,
-                        availablePeriods = uiState.availablePeriods,
-                        onSelectTarget = onSelectComparisonTarget,
-                        onSwap = onSwapComparisonPeriods
-                    )
-                }
-
-                // 2. Hero Month-over-Month Comparison Card
-                item {
-                    MonthOverMonthHeroCard(
-                        comparison = comparison,
-                        isPrivacyMode = uiState.isPrivacyModeEnabled
-                    )
-                }
-
-                // 3. Highlights: Top Increased & Top Savings Categories
-                if (comparison.topIncreasedCategory != null || comparison.topDecreasedCategory != null) {
+        when (uiState.dashboardMode) {
+            DashboardAnalyticsMode.COMPARISON -> {
+                val comparison = uiState.monthOverMonthComparison
+                if (comparison != null) {
+                    // 1. Comparison Period Selector & Swap Bar
                     item {
-                        MonthOverMonthHighlightsCard(
+                        MonthOverMonthPeriodSelectorBar(
+                            comparison = comparison,
+                            availablePeriods = uiState.availablePeriods,
+                            onSelectTarget = onSelectComparisonTarget,
+                            onSwap = onSwapComparisonPeriods
+                        )
+                    }
+
+                    // 2. Hero Month-over-Month Comparison Card
+                    item {
+                        MonthOverMonthHeroCard(
                             comparison = comparison,
                             isPrivacyMode = uiState.isPrivacyModeEnabled
                         )
                     }
-                }
 
-                // 4. Category-by-Category Comparison Breakdown Header & Cards
-                item {
-                    Text(
-                        text = "Kategori Bazında Harcama Farkları",
-                        style = MaterialTheme.typography.titleLarge,
-                        modifier = Modifier.padding(top = 4.dp)
-                    )
-                }
+                    // 3. Highlights: Top Increased & Top Savings Categories
+                    if (comparison.topIncreasedCategory != null || comparison.topDecreasedCategory != null) {
+                        item {
+                            MonthOverMonthHighlightsCard(
+                                comparison = comparison,
+                                isPrivacyMode = uiState.isPrivacyModeEnabled
+                            )
+                        }
+                    }
 
-                items(
-                    items = comparison.categoryComparisons,
-                    key = { "cmp_cat_${it.category.id}" }
-                ) { cmpItem ->
-                    CategoryComparisonCard(
-                        item = cmpItem,
-                        isPrivacyMode = uiState.isPrivacyModeEnabled
-                    )
-                }
-            } else {
-                // Insufficient data (< 2 periods)
-                item {
-                    ComparisonInsufficientDataCard(
-                        onPickStatementFile = onPickStatementFile
-                    )
+                    // 4. Category-by-Category Comparison Breakdown Header & Cards
+                    item {
+                        Text(
+                            text = "Kategori Bazında Harcama Farkları",
+                            style = MaterialTheme.typography.titleLarge,
+                            modifier = Modifier.padding(top = 4.dp)
+                        )
+                    }
+
+                    items(
+                        items = comparison.categoryComparisons,
+                        key = { "cmp_cat_${it.category.id}" }
+                    ) { cmpItem ->
+                        CategoryComparisonCard(
+                            item = cmpItem,
+                            isPrivacyMode = uiState.isPrivacyModeEnabled
+                        )
+                    }
+                } else {
+                    // Insufficient data (< 2 periods)
+                    item {
+                        ComparisonInsufficientDataCard(
+                            onPickStatementFile = onPickStatementFile
+                        )
+                    }
                 }
             }
-        } else {
+            DashboardAnalyticsMode.INSTALLMENTS -> {
+                val projection = uiState.installmentProjection
+                if (projection != null && (projection.totalActivePlansCount > 0 || projection.completedPlans.isNotEmpty())) {
+                    // 1. Hero Installment Summary Card
+                    item {
+                        InstallmentHeroCard(
+                            projection = projection,
+                            isPrivacyMode = uiState.isPrivacyModeEnabled
+                        )
+                    }
+
+                    // 2. Monthly Timeline Bar
+                    if (projection.monthlyForecasts.isNotEmpty()) {
+                        item {
+                            MonthlyInstallmentTimeline(
+                                forecasts = projection.monthlyForecasts,
+                                selectedMonth = uiState.selectedForecastMonth,
+                                onSelectMonth = onSelectForecastMonth,
+                                isPrivacyMode = uiState.isPrivacyModeEnabled
+                            )
+                        }
+                    }
+
+                    // 3. Active Plans Header + Selected Month filter badge if any
+                    val filteredActivePlans = if (uiState.selectedForecastMonth == null) {
+                        projection.activePlans
+                    } else {
+                        val keysInMonth = projection.monthlyForecasts
+                            .firstOrNull { it.yearMonth == uiState.selectedForecastMonth }
+                            ?.occurrences
+                            ?.map { it.planKey }
+                            ?.toSet()
+                            ?: emptySet()
+                        projection.activePlans.filter { it.planKey in keysInMonth }
+                    }
+
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .padding(top = 4.dp),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Devam Eden Taksit Planları (${filteredActivePlans.size})",
+                                style = MaterialTheme.typography.titleLarge
+                            )
+                            if (uiState.selectedForecastMonth != null) {
+                                Surface(
+                                    shape = RoundedCornerShape(10.dp),
+                                    color = MaterialTheme.colorScheme.primaryContainer,
+                                    modifier = Modifier.applePressScale {
+                                        onSelectForecastMonth(null)
+                                    }
+                                ) {
+                                    Row(
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp),
+                                        verticalAlignment = Alignment.CenterVertically,
+                                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                                    ) {
+                                        Text(
+                                            text = "${Formatters.formatYearMonthDisplay(uiState.selectedForecastMonth)} ✕",
+                                            style = MaterialTheme.typography.labelSmall,
+                                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                                            fontWeight = FontWeight.SemiBold
+                                        )
+                                    }
+                                }
+                            }
+                        }
+                    }
+
+                    items(
+                        items = filteredActivePlans,
+                        key = { "inst_plan_${it.planKey}" }
+                    ) { plan ->
+                        ActiveInstallmentPlanCard(
+                            plan = plan,
+                            isPrivacyMode = uiState.isPrivacyModeEnabled
+                        )
+                    }
+
+                    // 4. Completed Plans Section (if any)
+                    if (projection.completedPlans.isNotEmpty() && uiState.selectedForecastMonth == null) {
+                        item {
+                            Text(
+                                text = "Bu Dönem Tamamlanan Taksitler (${projection.completedPlans.size})",
+                                style = MaterialTheme.typography.titleLarge,
+                                modifier = Modifier.padding(top = 8.dp)
+                            )
+                        }
+
+                        items(
+                            items = projection.completedPlans,
+                            key = { "completed_plan_${it.planKey}" }
+                        ) { compPlan ->
+                            CompletedInstallmentPlanCard(
+                                plan = compPlan,
+                                isPrivacyMode = uiState.isPrivacyModeEnabled
+                            )
+                        }
+                    }
+                } else {
+                    item {
+                        InstallmentEmptyCard(onPickStatementFile = onPickStatementFile)
+                    }
+                }
+            }
+            DashboardAnalyticsMode.OVERVIEW -> {
             // 2. Unapproved Queue Call-to-Action Banner
             if (uiState.unapprovedTotalCount > 0) {
             item {
@@ -569,6 +709,7 @@ fun DashboardScreen(
             )
         }
         }
+    }
     }
 }
 
@@ -1707,6 +1848,505 @@ private fun ComparisonMiniStat(
             fontWeight = FontWeight.Bold,
             color = MaterialTheme.colorScheme.onSurface
         )
+    }
+}
+
+@Composable
+private fun InstallmentHeroCard(
+    projection: InstallmentCashflowProjection,
+    isPrivacyMode: Boolean
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CalendarMonth,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Text(
+                        text = "GELECEK TAKSİT YÜKÜ & NAKİT AKIŞI",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = Formatters.formatCurrency(projection.totalFutureDebt, isMasked = isPrivacyMode),
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Mevcut ${projection.totalActivePlansCount} taksit tamamlanana kadarki net toplam nakit çıkışı.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                ComparisonMiniStat(
+                    title = "Önümüzdeki Ay",
+                    value = Formatters.formatCurrency(projection.nextMonthCommitment, isMasked = isPrivacyMode)
+                )
+                ComparisonMiniStat(
+                    title = "Aktif Plan",
+                    value = "${projection.totalActivePlansCount} Adet"
+                )
+                ComparisonMiniStat(
+                    title = "Bitiş Tarihi",
+                    value = projection.maxEndYearMonth?.let { Formatters.formatYearMonthDisplay(it) } ?: "Tamamlandı"
+                )
+            }
+
+            Surface(
+                shape = RoundedCornerShape(14.dp),
+                color = AppleGreenLight.copy(alpha = 0.12f),
+                modifier = Modifier.fillMaxWidth()
+            ) {
+                Row(
+                    modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.AutoAwesome,
+                        contentDescription = null,
+                        tint = AppleGreenLight,
+                        modifier = Modifier.size(18.dp)
+                    )
+                    Text(
+                        text = "Aylık taksitler tamamlandıkça (ör. uçak biletleri ve alışverişler), aylık bütçe yükünüz kademeli olarak hafifleyecektir.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurface
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun MonthlyInstallmentTimeline(
+    forecasts: List<MonthlyInstallmentForecast>,
+    selectedMonth: String?,
+    onSelectMonth: (String?) -> Unit,
+    isPrivacyMode: Boolean
+) {
+    val haptic = LocalHapticFeedback.current
+    val maxCommitment = remember(forecasts) {
+        forecasts.maxOfOrNull { it.netInstallmentCommitment }?.coerceAtLeast(1.0) ?: 1.0
+    }
+
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            horizontalArrangement = Arrangement.SpaceBetween,
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Text(
+                text = "Aylık Taksit Dağılımı",
+                style = MaterialTheme.typography.titleLarge
+            )
+            if (selectedMonth != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.applePressScale {
+                        haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                        onSelectMonth(null)
+                    }
+                ) {
+                    Text(
+                        text = "Filtreyi Temizle",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 5.dp)
+                    )
+                }
+            }
+        }
+
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .horizontalScroll(rememberScrollState()),
+            horizontalArrangement = Arrangement.spacedBy(10.dp)
+        ) {
+            forecasts.forEach { forecast ->
+                val isSelected = forecast.yearMonth == selectedMonth
+                val loadRatio = (forecast.netInstallmentCommitment / maxCommitment).toFloat().coerceIn(0.08f, 1f)
+
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(
+                        containerColor = if (isSelected) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.surface
+                        }
+                    ),
+                    elevation = CardDefaults.cardElevation(defaultElevation = if (isSelected) 3.dp else 1.dp),
+                    modifier = Modifier
+                        .width(160.dp)
+                        .border(
+                            width = if (isSelected) 2.dp else 1.dp,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .applePressScale {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectMonth(if (isSelected) null else forecast.yearMonth)
+                        }
+                ) {
+                    Column(
+                        modifier = Modifier.padding(14.dp),
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = forecast.monthLabel,
+                            style = MaterialTheme.typography.labelLarge,
+                            fontWeight = FontWeight.Bold,
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurface
+                        )
+
+                        Text(
+                            text = Formatters.formatCurrency(forecast.netInstallmentCommitment, isMasked = isPrivacyMode),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary
+                        )
+
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "${forecast.activePlansCount} plan",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                            if (forecast.refundInstallmentTotal > 0.0) {
+                                Text(
+                                    text = "-${Formatters.formatCurrency(forecast.refundInstallmentTotal, isMasked = isPrivacyMode)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = AppleGreenLight,
+                                    fontWeight = FontWeight.SemiBold
+                                )
+                            }
+                        }
+
+                        LinearProgressIndicator(
+                            progress = { loadRatio },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(5.dp)
+                                .clip(RoundedCornerShape(3.dp)),
+                            color = if (isSelected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.primary.copy(alpha = 0.7f),
+                            trackColor = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ActiveInstallmentPlanCard(
+    plan: ActiveInstallmentPlan,
+    isPrivacyMode: Boolean
+) {
+    val catColor = plan.category?.let { Color.fromHex(it.colorHex) }
+        ?: MaterialTheme.colorScheme.primary
+    val progress = (plan.latestCurrentInstallment.toFloat() / plan.totalInstallments.toFloat()).coerceIn(0f, 1f)
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(20.dp)
+            )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Header Row: Category Icon + Merchant Title & Card Info + Amount
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    modifier = Modifier.weight(1f),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(catColor.copy(alpha = 0.14f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = resolveCategoryIcon(plan.category?.iconName ?: "HelpOutline"),
+                            contentDescription = null,
+                            tint = catColor,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    }
+
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = plan.merchantDisplayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        Text(
+                            text = plan.cardInfo ?: "Bilinmeyen Kart",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = Formatters.formatCurrency(plan.monthlyAmount, isMasked = isPrivacyMode),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = if (plan.type == TransactionType.REFUND) AppleGreenLight else MaterialTheme.colorScheme.onSurface
+                    )
+                    Text(
+                        text = if (plan.type == TransactionType.REFUND) "(İade Taksiti)" else "/ ay",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = if (plan.type == TransactionType.REFUND) AppleGreenLight else MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            // Installment Progress Bar Row
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "${plan.latestCurrentInstallment} / ${plan.totalInstallments} Taksit",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+                    Text(
+                        text = "%${(progress * 100).toInt()}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(6.dp)
+                        .clip(RoundedCornerShape(3.dp)),
+                    color = catColor,
+                    trackColor = catColor.copy(alpha = 0.16f)
+                )
+            }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            )
+
+            // Bottom Badges: Remaining Count, Remaining Balance, Completion Month
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                ) {
+                    Text(
+                        text = "${plan.remainingInstallments} taksit kaldı",
+                        style = MaterialTheme.typography.labelSmall,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+
+                Text(
+                    text = "Kalan: ${Formatters.formatCurrency(plan.remainingBalance, isMasked = isPrivacyMode)}",
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.SemiBold,
+                    color = MaterialTheme.colorScheme.primary
+                )
+
+                Text(
+                    text = "Bitiş: ${Formatters.formatYearMonthDisplay(plan.endYearMonth)}",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun CompletedInstallmentPlanCard(
+    plan: ActiveInstallmentPlan,
+    isPrivacyMode: Boolean
+) {
+    Card(
+        shape = RoundedCornerShape(16.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Icon(
+                    imageVector = Icons.Outlined.CheckCircle,
+                    contentDescription = null,
+                    tint = AppleGreenLight,
+                    modifier = Modifier.size(20.dp)
+                )
+                Column {
+                    Text(
+                        text = plan.merchantDisplayName,
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = "Tamamlandı (${plan.totalInstallments}/${plan.totalInstallments} Taksit)",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = AppleGreenLight
+                    )
+                }
+            }
+
+            Text(
+                text = Formatters.formatCurrency(plan.totalPlanAmount, isMasked = isPrivacyMode),
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+        }
+    }
+}
+
+@Composable
+private fun InstallmentEmptyCard(
+    onPickStatementFile: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Outlined.CalendarMonth,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            Text(
+                text = "Taksitli Harcama Bulunamadı",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Yüklenen ekstrelerde devam eden veya tamamlanan taksitli işlem (05/09, 02/06 vb.) tespit edilemedi. Taksitli işlemler içeren yeni bir ekstre yükleyerek taksit takviminizi görüntüleyebilirsiniz.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            OutlinedButton(
+                onClick = onPickStatementFile,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Outlined.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Ekstre Yükle")
+            }
+        }
     }
 }
 

@@ -5,6 +5,12 @@ enum class PeriodFilterMode {
     TRANSACTION_MONTH   // İşlem Tarihine göre (yearMonth)
 }
 
+enum class DashboardAnalyticsMode {
+    OVERVIEW,           // Dönem Özeti (Kategori pasta grafiği, harcamalar)
+    COMPARISON,         // Aydan Aya Kıyaslama Modu
+    INSTALLMENTS        // Gelecek Taksit Projeksiyonu & Taksit Takvimi
+}
+
 enum class TransactionSortOption(val title: String) {
     DATE_DESC("Tarih (En Yeni)"),
     DATE_ASC("Tarih (En Eski)"),
@@ -117,6 +123,58 @@ data class MonthOverMonthComparison(
     val categoryComparisons: List<CategoryComparisonItem>,
     val topIncreasedCategory: CategoryComparisonItem?,
     val topDecreasedCategory: CategoryComparisonItem?
+)
+
+data class FutureInstallmentOccurrence(
+    val planKey: String,
+    val merchantDisplayName: String,
+    val category: CategoryEntity?,
+    val cardInfo: String?,
+    val type: TransactionType,
+    val amount: Double,
+    val installmentNumber: Int,
+    val totalInstallments: Int,
+    val yearMonth: String
+)
+
+data class ActiveInstallmentPlan(
+    val planKey: String,
+    val merchantDisplayName: String,
+    val rawDescription: String,
+    val category: CategoryEntity?,
+    val cardInfo: String?,
+    val type: TransactionType,
+    val monthlyAmount: Double,
+    val latestCurrentInstallment: Int,
+    val totalInstallments: Int,
+    val remainingInstallments: Int,
+    val remainingBalance: Double,
+    val totalPlanAmount: Double,
+    val latestTransactionEpochDay: Long,
+    val latestStatementYearMonth: String,
+    val endYearMonth: String,
+    val isCompleted: Boolean
+)
+
+data class MonthlyInstallmentForecast(
+    val yearMonth: String,
+    val monthLabel: String,
+    val grossInstallmentExpense: Double,
+    val refundInstallmentTotal: Double,
+    val netInstallmentCommitment: Double,
+    val activePlansCount: Int,
+    val occurrences: List<FutureInstallmentOccurrence>
+)
+
+data class InstallmentCashflowProjection(
+    val baseStatementYearMonth: String,
+    val totalActivePlansCount: Int,
+    val totalFutureDebt: Double,
+    val nextMonthCommitment: Double,
+    val maxEndYearMonth: String?,
+    val monthlyForecasts: List<MonthlyInstallmentForecast>,
+    val activePlans: List<ActiveInstallmentPlan>,
+    val completedPlans: List<ActiveInstallmentPlan>
 )
 
 

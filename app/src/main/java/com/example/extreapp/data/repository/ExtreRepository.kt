@@ -2,21 +2,26 @@ package com.example.extreapp.data.repository
 
 import com.example.extreapp.data.local.DefaultCategories
 import com.example.extreapp.data.local.ExtrePersistenceStore
+import com.example.extreapp.data.local.entity.ActiveInstallmentPlan
 import com.example.extreapp.data.local.entity.ApprovalQueueGroup
 import com.example.extreapp.data.local.entity.CategoryBreakdownItem
 import com.example.extreapp.data.local.entity.CategoryComparisonItem
 import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.FutureInstallmentOccurrence
+import com.example.extreapp.data.local.entity.InstallmentCashflowProjection
 import com.example.extreapp.data.local.entity.LoadedStatementSummary
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantMonthlyTotal
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
 import com.example.extreapp.data.local.entity.MonthOverMonthComparison
+import com.example.extreapp.data.local.entity.MonthlyInstallmentForecast
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.RuleEntity
 import com.example.extreapp.data.local.entity.TransactionEntity
 import com.example.extreapp.data.local.entity.TransactionType
 import com.example.extreapp.data.local.entity.TransactionWithDetails
+import java.util.Locale
 import com.example.extreapp.domain.backup.BackupManager
 import com.example.extreapp.domain.backup.BackupRestoreReport
 import com.example.extreapp.domain.backup.ExtreBackupPayload
@@ -756,6 +761,208 @@ class ExtreRepository(
             topIncreasedCategory = topIncreased,
             topDecreasedCategory = topDecreased
         )
+    }
+
+    fun computeInstallmentProjection(snap: DatabaseSnapshot = _snapshot.value): InstallmentCashflowProjection {
+        val installmentTxs = snap.transactions.filter {
+            (it.type == TransactionType.EXPENSE || it.type == TransactionType.REFUND) &&
+                it.installmentCurrent != null &&
+                it.installmentTotal != null &&
+                it.installmentTotal > 0
+        }
+
+        if (installmentTxs.isEmpty()) {
+            return InstallmentCashflowProjection(
+                baseStatementYearMonth = "",
+                totalActivePlansCount = 0,
+                totalFutureDebt = 0.0,
+                nextMonthCommitment = 0.0,
+                maxEndYearMonth = null,
+                monthlyForecasts = emptyList(),
+                activePlans = emptyList(),
+                completedPlans = emptyList()
+            )
+        }
+
+        val categoriesById = snap.categories.associateBy { it.id }
+        val merchantsById = snap.merchants.associateBy { it.id }
+
+        // Determine base statement yearMonth (latest statement yearMonth or latest transaction yearMonth)
+        val baseStatementYearMonth = snap.transactions
+            .map { it.statementYearMonth.ifBlank { it.yearMonth } }
+            .filter { it.isNotBlank() }
+            .maxOrNull() ?: installmentTxs.map { it.yearMonth }.maxOrNull() ?: ""
+
+        // Group installment transactions into distinct series
+        val grouped = installmentTxs.groupBy { tx ->
+            val cleanTitle = tx.rawDescription.replace(INSTALLMENT_CLEAN_REGEX, "").trim()
+            val normCleanTitle = TurkishTextNormalizer.normalize(cleanTitle)
+            val formattedAmount = String.format(Locale.ROOT, "%.2f", tx.amount)
+            val card = tx.cardInfo?.trim().orEmpty()
+            "${card}|${tx.type}|${tx.installmentTotal}|$formattedAmount|$normCleanTitle"
+        }
+
+        val allOccurrences = mutableListOf<FutureInstallmentOccurrence>()
+        val activePlans = mutableListOf<ActiveInstallmentPlan>()
+        val completedPlans = mutableListOf<ActiveInstallmentPlan>()
+
+        for ((planKey, txList) in grouped) {
+            // Sort to find the latest installment transaction of this series
+            val latestTx = txList.sortedWith(
+                compareByDescending<TransactionEntity> { it.installmentCurrent ?: 0 }
+                    .thenByDescending { it.dateEpochDay }
+                    .thenByDescending { it.id }
+            ).first()
+
+            val latestCurrent = latestTx.installmentCurrent ?: 1
+            val totalInstallments = latestTx.installmentTotal ?: 1
+            val txStatementYm = latestTx.statementYearMonth.ifBlank { latestTx.yearMonth }
+
+            // Account for any elapsed months if latest statement in DB is newer than this transaction's statement
+            val monthsElapsed = monthsBetween(txStatementYm, baseStatementYearMonth).coerceAtLeast(0)
+            val effectiveCurrent = latestCurrent + monthsElapsed
+            val remainingCount = (totalInstallments - effectiveCurrent).coerceAtLeast(0)
+            val monthlyAmount = latestTx.amount
+            val remainingBalance = remainingCount * monthlyAmount
+            val totalPlanAmount = totalInstallments * monthlyAmount
+
+            // Resolve merchant display name
+            val cleanTitle = latestTx.rawDescription.replace(INSTALLMENT_CLEAN_REGEX, "").trim()
+            val merchantDisplayName = latestTx.merchantId?.let { merchantsById[it]?.displayName }
+                ?: SmartKeywordExtractor.analyze(cleanTitle).suggestedMerchantName
+                ?: cleanTitle.ifEmpty { "Taksitli İşlem" }
+
+            // Resolve category
+            val category = latestTx.categoryId?.let { categoriesById[it] }
+                ?: latestTx.merchantId?.let { mId -> merchantsById[mId]?.defaultCategoryId?.let { categoriesById[it] } }
+
+            val endYm = if (remainingCount > 0) {
+                addMonthsToYearMonth(baseStatementYearMonth, remainingCount)
+            } else {
+                txStatementYm
+            }
+
+            val plan = ActiveInstallmentPlan(
+                planKey = planKey,
+                merchantDisplayName = merchantDisplayName,
+                rawDescription = latestTx.rawDescription,
+                category = category,
+                cardInfo = latestTx.cardInfo,
+                type = latestTx.type,
+                monthlyAmount = monthlyAmount,
+                latestCurrentInstallment = effectiveCurrent.coerceAtMost(totalInstallments),
+                totalInstallments = totalInstallments,
+                remainingInstallments = remainingCount,
+                remainingBalance = remainingBalance,
+                totalPlanAmount = totalPlanAmount,
+                latestTransactionEpochDay = latestTx.dateEpochDay,
+                latestStatementYearMonth = txStatementYm,
+                endYearMonth = endYm,
+                isCompleted = remainingCount == 0
+            )
+
+            if (remainingCount == 0) {
+                completedPlans.add(plan)
+            } else {
+                activePlans.add(plan)
+                // Project future installment occurrences
+                for (step in 1..remainingCount) {
+                    val futureYm = addMonthsToYearMonth(baseStatementYearMonth, step)
+                    val instNum = effectiveCurrent + step
+                    allOccurrences.add(
+                        FutureInstallmentOccurrence(
+                            planKey = planKey,
+                            merchantDisplayName = merchantDisplayName,
+                            category = category,
+                            cardInfo = latestTx.cardInfo,
+                            type = latestTx.type,
+                            amount = monthlyAmount,
+                            installmentNumber = instNum,
+                            totalInstallments = totalInstallments,
+                            yearMonth = futureYm
+                        )
+                    )
+                }
+            }
+        }
+
+        // Build monthly forecasts
+        val forecastYearMonths = allOccurrences.map { it.yearMonth }.distinct().sorted()
+        val monthlyForecasts = forecastYearMonths.map { ym ->
+            val monthOccurrences = allOccurrences.filter { it.yearMonth == ym }
+            val gross = monthOccurrences.filter { it.type == TransactionType.EXPENSE }.sumOf { it.amount }
+            val refund = monthOccurrences.filter { it.type == TransactionType.REFUND }.sumOf { it.amount }
+            val net = (gross - refund).coerceAtLeast(0.0)
+            val plansInMonth = monthOccurrences.map { it.planKey }.distinct().size
+
+            MonthlyInstallmentForecast(
+                yearMonth = ym,
+                monthLabel = formatYearMonthTurkish(ym),
+                grossInstallmentExpense = gross,
+                refundInstallmentTotal = refund,
+                netInstallmentCommitment = net,
+                activePlansCount = plansInMonth,
+                occurrences = monthOccurrences.sortedWith(
+                    compareByDescending<FutureInstallmentOccurrence> { it.amount }
+                )
+            )
+        }
+
+        val totalFutureDebt = monthlyForecasts.sumOf { it.netInstallmentCommitment }
+        val nextMonthCommitment = monthlyForecasts.firstOrNull()?.netInstallmentCommitment ?: 0.0
+        val maxEndYearMonth = forecastYearMonths.lastOrNull()
+
+        return InstallmentCashflowProjection(
+            baseStatementYearMonth = baseStatementYearMonth,
+            totalActivePlansCount = activePlans.size,
+            totalFutureDebt = totalFutureDebt,
+            nextMonthCommitment = nextMonthCommitment,
+            maxEndYearMonth = maxEndYearMonth,
+            monthlyForecasts = monthlyForecasts,
+            activePlans = activePlans.sortedWith(
+                compareByDescending<ActiveInstallmentPlan> { it.remainingBalance }
+                    .thenByDescending { it.monthlyAmount }
+            ),
+            completedPlans = completedPlans.sortedWith(
+                compareByDescending<ActiveInstallmentPlan> { it.totalPlanAmount }
+            )
+        )
+    }
+
+    companion object {
+        private val INSTALLMENT_CLEAN_REGEX = Regex("""\s*\(?\s*0?\d{1,2}\s*/\s*0?\d{1,2}\s*(?:TAKS[İI]T)?\s*\)?""", RegexOption.IGNORE_CASE)
+
+        fun addMonthsToYearMonth(yearMonth: String, monthsToAdd: Int): String {
+            return try {
+                val ym = java.time.YearMonth.parse(yearMonth)
+                ym.plusMonths(monthsToAdd.toLong()).toString()
+            } catch (_: Exception) {
+                yearMonth
+            }
+        }
+
+        fun monthsBetween(fromYearMonth: String, toYearMonth: String): Int {
+            return try {
+                val from = java.time.YearMonth.parse(fromYearMonth)
+                val to = java.time.YearMonth.parse(toYearMonth)
+                (to.year - from.year) * 12 + (to.monthValue - from.monthValue)
+            } catch (_: Exception) {
+                0
+            }
+        }
+
+        fun formatYearMonthTurkish(yearMonth: String): String {
+            return try {
+                val ym = java.time.YearMonth.parse(yearMonth)
+                val monthNames = arrayOf(
+                    "Ocak", "Şubat", "Mart", "Nisan", "Mayıs", "Haziran",
+                    "Temmuz", "Ağustos", "Eylül", "Ekim", "Kasım", "Aralık"
+                )
+                "${monthNames[ym.monthValue - 1]} ${ym.year}"
+            } catch (_: Exception) {
+                yearMonth
+            }
+        }
     }
 
     fun computeApprovalQueueGroups(snap: DatabaseSnapshot = _snapshot.value): List<ApprovalQueueGroup> {

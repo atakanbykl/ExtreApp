@@ -9,6 +9,8 @@ import androidx.lifecycle.viewModelScope
 import com.example.extreapp.data.local.ExtreSqliteHelper
 import com.example.extreapp.data.local.entity.ApprovalQueueGroup
 import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.DashboardAnalyticsMode
+import com.example.extreapp.data.local.entity.InstallmentCashflowProjection
 import com.example.extreapp.data.local.entity.LoadedStatementSummary
 import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
@@ -48,6 +50,7 @@ enum class AppTab {
 data class ExtreUiState(
     val activeTab: AppTab = AppTab.DASHBOARD,
     val isPrivacyModeEnabled: Boolean = false,
+    val dashboardMode: DashboardAnalyticsMode = DashboardAnalyticsMode.OVERVIEW,
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val availablePeriods: List<String> = emptyList(),
     val selectedPeriod: String = "2026-10",
@@ -57,6 +60,8 @@ data class ExtreUiState(
     val isComparisonModeActive: Boolean = false,
     val comparisonTargetPeriod: String? = null,
     val monthOverMonthComparison: MonthOverMonthComparison? = null,
+    val selectedForecastMonth: String? = null,
+    val installmentProjection: InstallmentCashflowProjection? = null,
     val approvalQueueGroups: List<ApprovalQueueGroup> = emptyList(),
     val unapprovedTotalCount: Int = 0,
     val merchantSearchQuery: String = "",
@@ -79,12 +84,14 @@ data class ExtreUiState(
 private data class UiControlState(
     val activeTab: AppTab = AppTab.DASHBOARD,
     val isPrivacyModeEnabled: Boolean = false,
+    val dashboardMode: DashboardAnalyticsMode = DashboardAnalyticsMode.OVERVIEW,
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val selectedPeriod: String? = null,
     val selectedCategoryIdFilter: Long? = null,
     val transactionSortOption: TransactionSortOption = TransactionSortOption.DATE_DESC,
     val isComparisonModeActive: Boolean = false,
     val comparisonTargetPeriod: String? = null,
+    val selectedForecastMonth: String? = null,
     val merchantSearchQuery: String = "",
     val selectedMerchantId: Long? = null,
     val statementSearchQuery: String = "",
@@ -113,6 +120,7 @@ class ExtreViewModel(
     @Volatile private var cachedStatements: List<LoadedStatementSummary>? = null
     @Volatile private var cachedStatementSearch: String = ""
     @Volatile private var cachedFilteredStatements: List<LoadedStatementSummary> = emptyList()
+    @Volatile private var cachedInstallmentProjection: InstallmentCashflowProjection? = null
 
     val uiState: StateFlow<ExtreUiState> = combine(
         repository.snapshot,
@@ -216,9 +224,18 @@ class ExtreViewModel(
             null
         }
 
+        val installmentProjection = if (snapChanged || cachedInstallmentProjection == null) {
+            repository.computeInstallmentProjection(snap).also {
+                cachedInstallmentProjection = it
+            }
+        } else {
+            cachedInstallmentProjection
+        }
+
         ExtreUiState(
             activeTab = ctrl.activeTab,
             isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
+            dashboardMode = ctrl.dashboardMode,
             periodFilterMode = ctrl.periodFilterMode,
             availablePeriods = periods,
             selectedPeriod = effectivePeriod,
@@ -228,6 +245,8 @@ class ExtreViewModel(
             isComparisonModeActive = ctrl.isComparisonModeActive,
             comparisonTargetPeriod = effectiveTargetPeriod,
             monthOverMonthComparison = comparison,
+            selectedForecastMonth = ctrl.selectedForecastMonth,
+            installmentProjection = installmentProjection,
             approvalQueueGroups = queueGroups,
             unapprovedTotalCount = overview.unapprovedCount,
             merchantSearchQuery = ctrl.merchantSearchQuery,
@@ -274,9 +293,24 @@ class ExtreViewModel(
         )
     }
 
-    fun toggleComparisonMode() {
+    fun setDashboardMode(mode: DashboardAnalyticsMode) {
         controlState.value = controlState.value.copy(
-            isComparisonModeActive = !controlState.value.isComparisonModeActive
+            dashboardMode = mode,
+            isComparisonModeActive = (mode == DashboardAnalyticsMode.COMPARISON)
+        )
+    }
+
+    fun selectForecastMonth(yearMonth: String?) {
+        controlState.value = controlState.value.copy(
+            selectedForecastMonth = yearMonth
+        )
+    }
+
+    fun toggleComparisonMode() {
+        val nextActive = !controlState.value.isComparisonModeActive
+        controlState.value = controlState.value.copy(
+            isComparisonModeActive = nextActive,
+            dashboardMode = if (nextActive) DashboardAnalyticsMode.COMPARISON else DashboardAnalyticsMode.OVERVIEW
         )
     }
 

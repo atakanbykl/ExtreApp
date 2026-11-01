@@ -531,6 +531,8 @@ fun ExtreAppRoot() {
                                 onToggleSortByDate = { viewModel.toggleSortByDate() },
                                 onToggleSortByAmount = { viewModel.toggleSortByAmount() },
                                 onToggleComparisonMode = { viewModel.toggleComparisonMode() },
+                                onSelectDashboardMode = { viewModel.setDashboardMode(it) },
+                                onSelectForecastMonth = { viewModel.selectForecastMonth(it) },
                                 onSelectComparisonTarget = { viewModel.setComparisonTargetPeriod(it) },
                                 onSwapComparisonPeriods = { viewModel.swapComparisonPeriods() },
                                 onOpenApprovalQueue = { viewModel.selectTab(AppTab.APPROVAL_QUEUE) },
