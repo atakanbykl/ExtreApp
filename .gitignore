@@ -14,6 +14,9 @@
 .cxx
 local.properties
 
-# Extre statement files
+# Extre statement and backup files
 HESAP_OZETI.csv
 *.csv.bak
+extreapp_ornek_yedek_2026-11-01.json
+*yedek*.json
+*.json.bak
