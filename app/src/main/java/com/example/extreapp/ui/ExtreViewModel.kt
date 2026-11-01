@@ -46,15 +46,36 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class AppTab {
-    DASHBOARD,
-    STATEMENTS,
-    APPROVAL_QUEUE,
-    MERCHANTS,
-    RULES_AND_BACKUP
+    OVERVIEW,       // 📊 Genel Bakış (Dönem Özeti, Donut, Kategoriler, İşlemler)
+    PLANNING,       // 📅 Gelecek & Planlama (Taksit Takvimi, Tekrarlanan Ödemeler & Abonelikler)
+    INSIGHTS,       // 📈 Trend & Satıcılar (Aydan Aya Kıyasla, Satıcı Analitiği)
+    MANAGEMENT      // ⚙️ Yönetim (Ekstre Yönetimi, Onay Kuyruğu, Kurallar, Kategoriler, Yedek, Güvenlik)
+}
+
+enum class PlanningTabMode {
+    INSTALLMENTS,   // Taksit Takvimi
+    RECURRING       // Tekrarlanan Ödemeler & Abonelikler
+}
+
+enum class InsightsTabMode {
+    COMPARISON,     // Aydan Aya Kıyasla
+    MERCHANTS       // Satıcı Analitiği
+}
+
+enum class ManagementSection {
+    STATEMENTS,     // Ekstre Dosyaları Yönetimi
+    APPROVAL_QUEUE, // Tanımsız İşlemleri Onaylama Kuyruğu
+    RULES,          // Kategori Kuralları
+    CATEGORIES,     // Kategori Tanımları
+    SECURITY,       // Biyometri ve Ekran Güvenliği
+    BACKUP          // JSON Dışa/İçe Aktar ve Sıfırla
 }
 
 data class ExtreUiState(
-    val activeTab: AppTab = AppTab.DASHBOARD,
+    val activeTab: AppTab = AppTab.OVERVIEW,
+    val planningTabMode: PlanningTabMode = PlanningTabMode.INSTALLMENTS,
+    val insightsTabMode: InsightsTabMode = InsightsTabMode.COMPARISON,
+    val managementSection: ManagementSection? = null,
     val isPrivacyModeEnabled: Boolean = false,
     val isBiometricLockEnabled: Boolean = false,
     val isScreenProtectionEnabled: Boolean = true,
@@ -95,7 +116,10 @@ data class ExtreUiState(
 )
 
 private data class UiControlState(
-    val activeTab: AppTab = AppTab.DASHBOARD,
+    val activeTab: AppTab = AppTab.OVERVIEW,
+    val planningTabMode: PlanningTabMode = PlanningTabMode.INSTALLMENTS,
+    val insightsTabMode: InsightsTabMode = InsightsTabMode.COMPARISON,
+    val managementSection: ManagementSection? = null,
     val isPrivacyModeEnabled: Boolean = false,
     val isBiometricLockEnabled: Boolean = false,
     val isScreenProtectionEnabled: Boolean = true,
@@ -234,15 +258,11 @@ class ExtreViewModel(
             cachedFilteredStatements
         }
 
-        val effectiveTargetPeriod = if (ctrl.isComparisonModeActive) {
-            val otherPeriods = periods.filter { it != effectivePeriod }
-            ctrl.comparisonTargetPeriod?.takeIf { it in otherPeriods }
-                ?: otherPeriods.firstOrNull()
-        } else {
-            null
-        }
+        val otherPeriods = periods.filter { it != effectivePeriod }
+        val effectiveTargetPeriod = ctrl.comparisonTargetPeriod?.takeIf { it in otherPeriods }
+            ?: otherPeriods.firstOrNull()
 
-        val comparison = if (ctrl.isComparisonModeActive && effectiveTargetPeriod != null) {
+        val comparison = if (effectiveTargetPeriod != null && periods.size >= 2) {
             repository.computeMonthOverMonthComparison(
                 basePeriodKey = effectivePeriod,
                 targetPeriodKey = effectiveTargetPeriod,
@@ -271,6 +291,9 @@ class ExtreViewModel(
 
         ExtreUiState(
             activeTab = ctrl.activeTab,
+            planningTabMode = ctrl.planningTabMode,
+            insightsTabMode = ctrl.insightsTabMode,
+            managementSection = ctrl.managementSection,
             isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
             isBiometricLockEnabled = ctrl.isBiometricLockEnabled,
             isScreenProtectionEnabled = ctrl.isScreenProtectionEnabled,
@@ -284,7 +307,7 @@ class ExtreViewModel(
             selectedCategoryIdFilter = ctrl.selectedCategoryIdFilter,
             transactionSortOption = ctrl.transactionSortOption,
             monthlyOverview = overview,
-            isComparisonModeActive = ctrl.isComparisonModeActive,
+            isComparisonModeActive = (ctrl.insightsTabMode == InsightsTabMode.COMPARISON),
             comparisonTargetPeriod = effectiveTargetPeriod,
             monthOverMonthComparison = comparison,
             selectedForecastMonth = ctrl.selectedForecastMonth,
@@ -390,7 +413,33 @@ class ExtreViewModel(
     fun selectTab(tab: AppTab) {
         controlState.value = controlState.value.copy(
             activeTab = tab,
-            selectedMerchantId = if (tab != AppTab.MERCHANTS) null else controlState.value.selectedMerchantId
+            selectedMerchantId = if (tab != AppTab.INSIGHTS) null else controlState.value.selectedMerchantId
+        )
+    }
+
+    fun setPlanningTabMode(mode: PlanningTabMode) {
+        controlState.value = controlState.value.copy(planningTabMode = mode)
+    }
+
+    fun setInsightsTabMode(mode: InsightsTabMode) {
+        controlState.value = controlState.value.copy(insightsTabMode = mode)
+    }
+
+    fun setManagementSection(section: ManagementSection?) {
+        controlState.value = controlState.value.copy(managementSection = section)
+    }
+
+    fun openApprovalQueue() {
+        controlState.value = controlState.value.copy(
+            activeTab = AppTab.MANAGEMENT,
+            managementSection = ManagementSection.APPROVAL_QUEUE
+        )
+    }
+
+    fun openStatementsManagement() {
+        controlState.value = controlState.value.copy(
+            activeTab = AppTab.MANAGEMENT,
+            managementSection = ManagementSection.STATEMENTS
         )
     }
 
@@ -490,7 +539,8 @@ class ExtreViewModel(
 
     fun openMerchantDetail(merchantId: Long) {
         controlState.value = controlState.value.copy(
-            activeTab = AppTab.MERCHANTS,
+            activeTab = AppTab.INSIGHTS,
+            insightsTabMode = InsightsTabMode.MERCHANTS,
             selectedMerchantId = merchantId
         )
     }
@@ -825,7 +875,7 @@ class ExtreViewModel(
 
     fun jumpToPeriod(periodKey: String) {
         controlState.value = controlState.value.copy(
-            activeTab = AppTab.DASHBOARD,
+            activeTab = AppTab.OVERVIEW,
             selectedPeriod = periodKey
         )
     }

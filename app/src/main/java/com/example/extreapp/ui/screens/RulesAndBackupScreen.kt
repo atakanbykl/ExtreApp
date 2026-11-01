@@ -120,9 +120,10 @@ fun RulesAndBackupScreen(
     onSetScreenProtectionEnabled: (Boolean) -> Unit = {},
     onSetLockTimeout: (LockTimeout) -> Unit = {},
     onLockAppNow: () -> Unit = {},
+    initialSubTab: Int = 0,
     modifier: Modifier = Modifier
 ) {
-    var selectedSubTab by remember { mutableIntStateOf(0) }
+    var selectedSubTab by remember(initialSubTab) { mutableIntStateOf(initialSubTab) }
     val subTabs = RulesBackupSubTab.entries
 
     var showAddRuleForm by remember { mutableStateOf(false) }

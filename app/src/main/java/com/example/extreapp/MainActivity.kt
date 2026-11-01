@@ -68,17 +68,22 @@ import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.lifecycle.viewmodel.compose.viewModel
+import androidx.compose.material.icons.automirrored.outlined.TrendingUp
+import androidx.compose.material.icons.outlined.CalendarMonth
+import androidx.compose.material.icons.outlined.Tune
 import com.example.extreapp.domain.security.BiometricAuthManager
 import com.example.extreapp.ui.AppTab
+import com.example.extreapp.ui.PlanningTabMode
+import com.example.extreapp.ui.InsightsTabMode
+import com.example.extreapp.ui.ManagementSection
 import com.example.extreapp.ui.ExtreViewModel
 import com.example.extreapp.ui.components.AppleAppLockScreen
 import com.example.extreapp.ui.components.ColumnMappingWizardDialog
 import com.example.extreapp.ui.components.ImportReportDialog
-import com.example.extreapp.ui.screens.ApprovalQueueScreen
-import com.example.extreapp.ui.screens.DashboardScreen
-import com.example.extreapp.ui.screens.MerchantsScreen
-import com.example.extreapp.ui.screens.RulesAndBackupScreen
-import com.example.extreapp.ui.screens.StatementsScreen
+import com.example.extreapp.ui.screens.OverviewScreen
+import com.example.extreapp.ui.screens.PlanningScreen
+import com.example.extreapp.ui.screens.InsightsScreen
+import com.example.extreapp.ui.screens.ManagementHubScreen
 import com.example.extreapp.ui.theme.ExtreAppTheme
 import com.example.extreapp.ui.theme.applePressScale
 import java.time.LocalDate
@@ -186,7 +191,7 @@ fun ExtreAppRoot() {
             report = report,
             isPrivacyMode = uiState.isPrivacyModeEnabled,
             onDismiss = { viewModel.dismissImportReport() },
-            onOpenApprovalQueue = { viewModel.selectTab(AppTab.APPROVAL_QUEUE) }
+            onOpenApprovalQueue = { viewModel.openApprovalQueue() }
         )
     }
 
@@ -211,13 +216,11 @@ fun ExtreAppRoot() {
                             ) {
                                 Box(contentAlignment = Alignment.Center) {
                                     Icon(
-                                        imageVector = when {
-                                            uiState.activeTab == AppTab.MERCHANTS && uiState.selectedMerchantId != null -> Icons.Outlined.Storefront
-                                            uiState.activeTab == AppTab.DASHBOARD -> Icons.Outlined.DonutLarge
-                                            uiState.activeTab == AppTab.STATEMENTS -> Icons.AutoMirrored.Outlined.ReceiptLong
-                                            uiState.activeTab == AppTab.APPROVAL_QUEUE -> Icons.Outlined.PendingActions
-                                            uiState.activeTab == AppTab.MERCHANTS -> Icons.Outlined.Storefront
-                                            else -> Icons.AutoMirrored.Outlined.Rule
+                                        imageVector = when (uiState.activeTab) {
+                                            AppTab.OVERVIEW -> Icons.Outlined.DonutLarge
+                                            AppTab.PLANNING -> Icons.Outlined.CalendarMonth
+                                            AppTab.INSIGHTS -> if (uiState.selectedMerchantId != null) Icons.Outlined.Storefront else Icons.AutoMirrored.Outlined.TrendingUp
+                                            AppTab.MANAGEMENT -> Icons.Outlined.Tune
                                         },
                                         contentDescription = null,
                                         tint = MaterialTheme.colorScheme.primary,
@@ -234,13 +237,11 @@ fun ExtreAppRoot() {
                                     letterSpacing = 1.1.sp
                                 )
                                 Text(
-                                    text = when {
-                                        uiState.activeTab == AppTab.MERCHANTS && uiState.selectedMerchantId != null -> "Satıcı Detayı"
-                                        uiState.activeTab == AppTab.DASHBOARD -> "Aylık Analiz"
-                                        uiState.activeTab == AppTab.STATEMENTS -> "Ekstre Yönetimi"
-                                        uiState.activeTab == AppTab.APPROVAL_QUEUE -> "Onay Kuyruğu"
-                                        uiState.activeTab == AppTab.MERCHANTS -> "Satıcı Analitiği"
-                                        else -> "Kurallar & Yedek"
+                                    text = when (uiState.activeTab) {
+                                        AppTab.OVERVIEW -> "Genel Bakış"
+                                        AppTab.PLANNING -> if (uiState.planningTabMode == PlanningTabMode.INSTALLMENTS) "Taksit Takvimi" else "Tekrarlanan Ödemeler"
+                                        AppTab.INSIGHTS -> if (uiState.selectedMerchantId != null) "Satıcı Detayı" else if (uiState.insightsTabMode == InsightsTabMode.COMPARISON) "Aydan Aya Kıyasla" else "Satıcı Analitiği"
+                                        AppTab.MANAGEMENT -> if (uiState.managementSection != null) "Yönetim" else "Yönetim Merkezi"
                                     },
                                     style = MaterialTheme.typography.titleMedium,
                                     fontWeight = FontWeight.Bold,
@@ -365,13 +366,13 @@ fun ExtreAppRoot() {
                     containerColor = Color.Transparent,
                     tonalElevation = 0.dp
                 ) {
-                    // Tab 1: Analiz
-                    val isDashboard = uiState.activeTab == AppTab.DASHBOARD
+                    // Tab 1: Genel Bakış
+                    val isOverview = uiState.activeTab == AppTab.OVERVIEW
                     NavigationBarItem(
-                        selected = isDashboard,
+                        selected = isOverview,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            viewModel.selectTab(AppTab.DASHBOARD)
+                            viewModel.selectTab(AppTab.OVERVIEW)
                         },
                         icon = {
                             Icon(
@@ -382,9 +383,9 @@ fun ExtreAppRoot() {
                         },
                         label = {
                             Text(
-                                text = "Analiz",
+                                text = "Genel Bakış",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isDashboard) FontWeight.Bold else FontWeight.Medium,
+                                fontWeight = if (isOverview) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center
@@ -394,26 +395,26 @@ fun ExtreAppRoot() {
                         colors = navItemColors
                     )
 
-                    // Tab 2: Ekstreler
-                    val isStatements = uiState.activeTab == AppTab.STATEMENTS
+                    // Tab 2: Gelecek & Plan
+                    val isPlanning = uiState.activeTab == AppTab.PLANNING
                     NavigationBarItem(
-                        selected = isStatements,
+                        selected = isPlanning,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            viewModel.selectTab(AppTab.STATEMENTS)
+                            viewModel.selectTab(AppTab.PLANNING)
                         },
                         icon = {
                             Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.ReceiptLong,
+                                imageVector = Icons.Outlined.CalendarMonth,
                                 contentDescription = null,
                                 modifier = Modifier.size(24.dp)
                             )
                         },
                         label = {
                             Text(
-                                text = "Ekstreler",
+                                text = "Gelecek & Plan",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isStatements) FontWeight.Bold else FontWeight.Medium,
+                                fontWeight = if (isPlanning) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center
@@ -423,13 +424,42 @@ fun ExtreAppRoot() {
                         colors = navItemColors
                     )
 
-                    // Tab 3: Onaylar
-                    val isApproval = uiState.activeTab == AppTab.APPROVAL_QUEUE
+                    // Tab 3: Trend & Satıcı
+                    val isInsights = uiState.activeTab == AppTab.INSIGHTS
                     NavigationBarItem(
-                        selected = isApproval,
+                        selected = isInsights,
                         onClick = {
                             haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            viewModel.selectTab(AppTab.APPROVAL_QUEUE)
+                            viewModel.selectTab(AppTab.INSIGHTS)
+                        },
+                        icon = {
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.TrendingUp,
+                                contentDescription = null,
+                                modifier = Modifier.size(24.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                text = "Trend & Satıcı",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = if (isInsights) FontWeight.Bold else FontWeight.Medium,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                textAlign = TextAlign.Center
+                            )
+                        },
+                        alwaysShowLabel = true,
+                        colors = navItemColors
+                    )
+
+                    // Tab 4: Yönetim
+                    val isManagement = uiState.activeTab == AppTab.MANAGEMENT
+                    NavigationBarItem(
+                        selected = isManagement,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            viewModel.selectTab(AppTab.MANAGEMENT)
                         },
                         icon = {
                             if (uiState.unapprovedTotalCount > 0) {
@@ -447,14 +477,14 @@ fun ExtreAppRoot() {
                                     }
                                 ) {
                                     Icon(
-                                        imageVector = Icons.Outlined.PendingActions,
+                                        imageVector = Icons.Outlined.Tune,
                                         contentDescription = null,
                                         modifier = Modifier.size(24.dp)
                                     )
                                 }
                             } else {
                                 Icon(
-                                    imageVector = Icons.Outlined.PendingActions,
+                                    imageVector = Icons.Outlined.Tune,
                                     contentDescription = null,
                                     modifier = Modifier.size(24.dp)
                                 )
@@ -462,67 +492,9 @@ fun ExtreAppRoot() {
                         },
                         label = {
                             Text(
-                                text = "Onaylar",
+                                text = "Yönetim",
                                 style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isApproval) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-                        },
-                        alwaysShowLabel = true,
-                        colors = navItemColors
-                    )
-
-                    // Tab 4: Satıcılar
-                    val isMerchants = uiState.activeTab == AppTab.MERCHANTS
-                    NavigationBarItem(
-                        selected = isMerchants,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            viewModel.selectTab(AppTab.MERCHANTS)
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.Outlined.Storefront,
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = "Satıcılar",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isMerchants) FontWeight.Bold else FontWeight.Medium,
-                                maxLines = 1,
-                                overflow = TextOverflow.Ellipsis,
-                                textAlign = TextAlign.Center
-                            )
-                        },
-                        alwaysShowLabel = true,
-                        colors = navItemColors
-                    )
-
-                    // Tab 5: Kurallar
-                    val isRules = uiState.activeTab == AppTab.RULES_AND_BACKUP
-                    NavigationBarItem(
-                        selected = isRules,
-                        onClick = {
-                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
-                            viewModel.selectTab(AppTab.RULES_AND_BACKUP)
-                        },
-                        icon = {
-                            Icon(
-                                imageVector = Icons.AutoMirrored.Outlined.Rule,
-                                contentDescription = null,
-                                modifier = Modifier.size(24.dp)
-                            )
-                        },
-                        label = {
-                            Text(
-                                text = "Kurallar",
-                                style = MaterialTheme.typography.labelSmall,
-                                fontWeight = if (isRules) FontWeight.Bold else FontWeight.Medium,
+                                fontWeight = if (isManagement) FontWeight.Bold else FontWeight.Medium,
                                 maxLines = 1,
                                 overflow = TextOverflow.Ellipsis,
                                 textAlign = TextAlign.Center
@@ -579,8 +551,8 @@ fun ExtreAppRoot() {
             Box(modifier = Modifier.weight(1f)) {
                 Crossfade(targetState = uiState.activeTab, label = "tabCrossfade") { tab ->
                     when (tab) {
-                        AppTab.DASHBOARD -> {
-                            DashboardScreen(
+                        AppTab.OVERVIEW -> {
+                            OverviewScreen(
                                 uiState = uiState,
                                 onPickStatementFile = {
                                     statementPickerLauncher.launch(
@@ -601,19 +573,38 @@ fun ExtreAppRoot() {
                                 onToggleCategoryFilter = { viewModel.toggleCategoryFilter(it) },
                                 onToggleSortByDate = { viewModel.toggleSortByDate() },
                                 onToggleSortByAmount = { viewModel.toggleSortByAmount() },
-                                onToggleComparisonMode = { viewModel.toggleComparisonMode() },
-                                onSelectDashboardMode = { viewModel.setDashboardMode(it) },
-                                onSelectForecastMonth = { viewModel.selectForecastMonth(it) },
-                                onSelectRecurringTabFilter = { viewModel.selectRecurringTabFilter(it) },
-                                onSelectComparisonTarget = { viewModel.setComparisonTargetPeriod(it) },
-                                onSwapComparisonPeriods = { viewModel.swapComparisonPeriods() },
-                                onOpenApprovalQueue = { viewModel.selectTab(AppTab.APPROVAL_QUEUE) },
+                                onOpenApprovalQueue = { viewModel.openApprovalQueue() },
                                 onOpenMerchantDetail = { viewModel.openMerchantDetail(it) }
                             )
                         }
-                        AppTab.STATEMENTS -> {
-                            StatementsScreen(
+                        AppTab.PLANNING -> {
+                            PlanningScreen(
                                 uiState = uiState,
+                                onSelectPlanningTabMode = { viewModel.setPlanningTabMode(it) },
+                                onSelectForecastMonth = { viewModel.selectForecastMonth(it) },
+                                onSelectRecurringTabFilter = { viewModel.selectRecurringTabFilter(it) },
+                                onPickStatementFile = {
+                                    statementPickerLauncher.launch(
+                                        arrayOf(
+                                            "text/csv",
+                                            "text/comma-separated-values",
+                                            "text/plain",
+                                            "application/csv",
+                                            "application/vnd.ms-excel",
+                                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            "application/pdf",
+                                            "*/*"
+                                        )
+                                    )
+                                }
+                            )
+                        }
+                        AppTab.INSIGHTS -> {
+                            InsightsScreen(
+                                uiState = uiState,
+                                onSelectInsightsTabMode = { viewModel.setInsightsTabMode(it) },
+                                onSelectComparisonTarget = { viewModel.setComparisonTargetPeriod(it) },
+                                onSwapComparisonPeriods = { viewModel.swapComparisonPeriods() },
                                 onPickStatementFile = {
                                     statementPickerLauncher.launch(
                                         arrayOf(
@@ -628,33 +619,9 @@ fun ExtreAppRoot() {
                                         )
                                     )
                                 },
-                                onSearchQueryChange = { viewModel.updateStatementSearch(it) },
-                                onDeleteStatement = { viewModel.deleteLoadedStatement(it) },
-                                onRenameStatement = { oldName, newName -> viewModel.renameLoadedStatement(oldName, newName) },
-                                onReapplyRules = { viewModel.reapplyRulesToStatement(it) },
-                                onJumpToPeriod = { viewModel.jumpToPeriod(it) },
-                                onClearAllStatements = { viewModel.clearAllStatements() }
-                            )
-                        }
-                        AppTab.APPROVAL_QUEUE -> {
-                            ApprovalQueueScreen(
-                                uiState = uiState,
-                                onApproveGroup = { group, keyword, merchantName, categoryId ->
-                                    viewModel.approveQueueItemAndSaveRule(
-                                        group = group,
-                                        keyword = keyword,
-                                        merchantDisplayName = merchantName,
-                                        categoryId = categoryId
-                                    )
-                                }
-                            )
-                        }
-                        AppTab.MERCHANTS -> {
-                            MerchantsScreen(
-                                uiState = uiState,
-                                onSearchQueryChange = { viewModel.updateMerchantSearch(it) },
+                                onSearchMerchantQueryChange = { viewModel.updateMerchantSearch(it) },
                                 onSelectMerchant = { viewModel.openMerchantDetail(it) },
-                                onBackFromDetail = { viewModel.closeMerchantDetail() },
+                                onBackFromMerchantDetail = { viewModel.closeMerchantDetail() },
                                 onEditMerchant = { merchantId, newDisplayName, newCategoryId ->
                                     viewModel.editExistingMerchant(
                                         merchantId = merchantId,
@@ -673,9 +640,38 @@ fun ExtreAppRoot() {
                                 }
                             )
                         }
-                        AppTab.RULES_AND_BACKUP -> {
-                            RulesAndBackupScreen(
+                        AppTab.MANAGEMENT -> {
+                            ManagementHubScreen(
                                 uiState = uiState,
+                                onSelectSection = { viewModel.setManagementSection(it) },
+                                onPickStatementFile = {
+                                    statementPickerLauncher.launch(
+                                        arrayOf(
+                                            "text/csv",
+                                            "text/comma-separated-values",
+                                            "text/plain",
+                                            "application/csv",
+                                            "application/vnd.ms-excel",
+                                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                                            "application/pdf",
+                                            "*/*"
+                                        )
+                                    )
+                                },
+                                onSearchStatementQueryChange = { viewModel.updateStatementSearch(it) },
+                                onDeleteStatement = { viewModel.deleteLoadedStatement(it) },
+                                onRenameStatement = { oldName, newName -> viewModel.renameLoadedStatement(oldName, newName) },
+                                onReapplyRulesToStatement = { viewModel.reapplyRulesToStatement(it) },
+                                onJumpToPeriod = { viewModel.jumpToPeriod(it) },
+                                onClearAllStatements = { viewModel.clearAllStatements() },
+                                onApproveGroup = { group, keyword, merchantName, categoryId ->
+                                    viewModel.approveQueueItemAndSaveRule(
+                                        group = group,
+                                        keyword = keyword,
+                                        merchantDisplayName = merchantName,
+                                        categoryId = categoryId
+                                    )
+                                },
                                 onExportBackupClick = {
                                     val dateStr = LocalDate.now().toString()
                                     backupExportLauncher.launch("extreapp_yedek_$dateStr.json")
