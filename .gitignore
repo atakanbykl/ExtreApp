@@ -13,3 +13,7 @@
 .externalNativeBuild
 .cxx
 local.properties
+
+# Extre statement files
+HESAP_OZETI.csv
+*.csv.bak
