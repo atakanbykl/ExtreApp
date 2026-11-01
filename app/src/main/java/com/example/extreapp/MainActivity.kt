@@ -377,8 +377,8 @@ fun ExtreAppRoot() {
                                 onApproveCandidateForRule = { anchorRuleId, candidate ->
                                     viewModel.approveCandidateForRule(anchorRuleId, candidate)
                                 },
-                                onApproveAllCandidatesForRule = { anchorRuleId ->
-                                    viewModel.approveAllCandidatesForRule(anchorRuleId)
+                                onApproveAllCandidatesForRule = { anchorRuleId, candidates ->
+                                    viewModel.approveAllCandidatesForRule(anchorRuleId, candidates)
                                 },
                                 onAddCategory = { name, hex ->
                                     viewModel.addCustomCategory(name, "Category", hex)

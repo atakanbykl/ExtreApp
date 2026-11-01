@@ -75,6 +75,7 @@ import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.RuleEntity
 import com.example.extreapp.domain.engine.RuleMatchCandidate
 import com.example.extreapp.domain.engine.RuleMatchCandidateType
+import com.example.extreapp.domain.engine.RuleSimilarityAnalyzer
 import com.example.extreapp.ui.ExtreUiState
 import com.example.extreapp.ui.theme.AppleGreenLight
 import com.example.extreapp.ui.theme.AppleOrangeLight
@@ -101,7 +102,7 @@ fun RulesAndBackupScreen(
     onDeleteRule: (Long) -> Unit,
     onUpdateRulePriority: (Long, Int) -> Unit,
     onApproveCandidateForRule: (anchorRuleId: Long, candidate: RuleMatchCandidate) -> Unit,
-    onApproveAllCandidatesForRule: (anchorRuleId: Long) -> Unit,
+    onApproveAllCandidatesForRule: (anchorRuleId: Long, candidates: List<RuleMatchCandidate>) -> Unit,
     onAddCategory: (name: String, colorHex: Long) -> Unit,
     onClearAllData: () -> Unit,
     modifier: Modifier = Modifier
@@ -166,7 +167,15 @@ fun RulesAndBackupScreen(
     if (anchorRuleForSim != null) {
         val anchorMerchantName = merchantsById[anchorRuleForSim.merchantId]?.displayName ?: "Bilinmeyen Satıcı"
         val anchorCategoryName = categoriesById[anchorRuleForSim.categoryId]?.name ?: "Diğer"
-        val candidates = uiState.ruleSimilarityCandidatesMap[anchorRuleForSim.id].orEmpty()
+        val candidates: List<RuleMatchCandidate> = remember(anchorRuleForSim.id, uiState.rules, uiState.approvalQueueGroups) {
+            RuleSimilarityAnalyzer.findCandidatesForRule(
+                anchorRule = anchorRuleForSim,
+                allRules = uiState.rules,
+                merchants = uiState.merchants,
+                categories = uiState.categories,
+                queueGroups = uiState.approvalQueueGroups
+            )
+        }
 
         RuleSimilarityDialog(
             anchorRule = anchorRuleForSim,
@@ -177,7 +186,7 @@ fun RulesAndBackupScreen(
                 onApproveCandidateForRule(anchorRuleForSim.id, candidate)
             },
             onApproveAll = {
-                onApproveAllCandidatesForRule(anchorRuleForSim.id)
+                onApproveAllCandidatesForRule(anchorRuleForSim.id, candidates)
                 similaritySelectedRuleId = null
             },
             onDismiss = { similaritySelectedRuleId = null }
@@ -475,13 +484,11 @@ fun RulesAndBackupScreen(
                         ) { rule ->
                             val merchantName = merchantsById[rule.merchantId]?.displayName ?: "Bilinmeyen Satıcı"
                             val category = categoriesById[rule.categoryId]
-                            val similarityCount = uiState.ruleSimilarityCandidatesMap[rule.id]?.size ?: 0
 
                             RuleItemCard(
                                 rule = rule,
                                 merchantName = merchantName,
                                 category = category,
-                                similarityCount = similarityCount,
                                 onOpenSimilaritySuggestions = { similaritySelectedRuleId = rule.id },
                                 onEdit = { editingRuleId = rule.id },
                                 onIncreasePriority = { onUpdateRulePriority(rule.id, rule.priority + 5) },
@@ -1184,7 +1191,6 @@ private fun RuleItemCard(
     rule: RuleEntity,
     merchantName: String,
     category: CategoryEntity?,
-    similarityCount: Int,
     onOpenSimilaritySuggestions: () -> Unit,
     onEdit: () -> Unit,
     onIncreasePriority: () -> Unit,
@@ -1222,11 +1228,7 @@ private fun RuleItemCard(
 
                     Surface(
                         shape = RoundedCornerShape(8.dp),
-                        color = if (similarityCount > 0) {
-                            AppleOrangeLight.copy(alpha = 0.16f)
-                        } else {
-                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
-                        },
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.5f),
                         modifier = Modifier.applePressScale(onClick = onOpenSimilaritySuggestions)
                     ) {
                         Row(
@@ -1237,17 +1239,13 @@ private fun RuleItemCard(
                             Icon(
                                 imageVector = Icons.Outlined.AutoAwesome,
                                 contentDescription = null,
-                                tint = if (similarityCount > 0) AppleOrangeLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                                tint = MaterialTheme.colorScheme.primary,
                                 modifier = Modifier.size(14.dp)
                             )
                             Text(
-                                text = if (similarityCount > 0) {
-                                    "Eşleşme Önerisi ($similarityCount)"
-                                } else {
-                                    "Eşleşme Önerisi"
-                                },
+                                text = "Eşleşme Önerisi",
                                 style = MaterialTheme.typography.labelSmall,
-                                color = if (similarityCount > 0) AppleOrangeLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                                color = MaterialTheme.colorScheme.primary,
                                 fontWeight = FontWeight.Bold
                             )
                         }

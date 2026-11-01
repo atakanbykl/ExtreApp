@@ -29,6 +29,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.flowOn
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -82,36 +83,83 @@ class ExtreViewModel(
 
     private val controlState = MutableStateFlow(UiControlState())
 
+    // Cache references to avoid recomputing when underlying data has not changed
+    @Volatile private var cachedSnapshot: com.example.extreapp.data.repository.DatabaseSnapshot? = null
+    @Volatile private var cachedPeriodMode: PeriodFilterMode? = null
+    @Volatile private var cachedPeriods: List<String> = emptyList()
+    @Volatile private var cachedPeriodKey: String? = null
+    @Volatile private var cachedOverview: MonthlyOverviewSummary? = null
+    @Volatile private var cachedQueueGroups: List<ApprovalQueueGroup> = emptyList()
+    @Volatile private var cachedSearchQuery: String = ""
+    @Volatile private var cachedMerchantSummaries: List<MerchantSummaryItem> = emptyList()
+    @Volatile private var cachedSelectedMerchantId: Long? = null
+    @Volatile private var cachedMerchantDetail: MerchantDetailData? = null
+
     val uiState: StateFlow<ExtreUiState> = combine(
         repository.snapshot,
         controlState
     ) { snap, ctrl ->
-        val availablePeriods = repository.getAvailablePeriods(ctrl.periodFilterMode, snap)
-        val effectivePeriod = ctrl.selectedPeriod?.takeIf { it in availablePeriods }
-            ?: availablePeriods.firstOrNull()
+        val snapChanged = snap !== cachedSnapshot
+        if (snapChanged) {
+            cachedSnapshot = snap
+        }
+
+        val periods = if (snapChanged || ctrl.periodFilterMode != cachedPeriodMode) {
+            cachedPeriodMode = ctrl.periodFilterMode
+            repository.getAvailablePeriods(ctrl.periodFilterMode, snap).also {
+                cachedPeriods = it
+            }
+        } else {
+            cachedPeriods
+        }
+
+        val effectivePeriod = ctrl.selectedPeriod?.takeIf { it in periods }
+            ?: periods.firstOrNull()
             ?: "2026-10"
 
-        val overview = repository.computeMonthlyOverview(
-            periodKey = effectivePeriod,
-            filterMode = ctrl.periodFilterMode,
-            snap = snap
-        )
-        val queueGroups = repository.computeApprovalQueueGroups(snap)
-        val merchantList = repository.computeMerchantSummaries(ctrl.merchantSearchQuery, snap)
-        val merchantDetail = ctrl.selectedMerchantId?.let {
-            repository.computeMerchantDetail(it, snap)
+        val overview = if (snapChanged || ctrl.periodFilterMode != cachedPeriodMode || effectivePeriod != cachedPeriodKey || cachedOverview == null) {
+            cachedPeriodKey = effectivePeriod
+            repository.computeMonthlyOverview(
+                periodKey = effectivePeriod,
+                filterMode = ctrl.periodFilterMode,
+                snap = snap
+            ).also { cachedOverview = it }
+        } else {
+            cachedOverview!!
         }
-        val candidatesByRuleId = RuleSimilarityAnalyzer.computeCandidatesMapForAllRules(
-            allRules = snap.rules,
-            merchants = snap.merchants,
-            categories = snap.categories,
-            queueGroups = queueGroups
-        )
+
+        val queueGroups = if (snapChanged || (cachedQueueGroups.isEmpty() && snap.transactions.isNotEmpty())) {
+            repository.computeApprovalQueueGroups(snap).also { cachedQueueGroups = it }
+        } else {
+            cachedQueueGroups
+        }
+
+        val merchantList = if (snapChanged || ctrl.merchantSearchQuery != cachedSearchQuery) {
+            cachedSearchQuery = ctrl.merchantSearchQuery
+            repository.computeMerchantSummaries(ctrl.merchantSearchQuery, snap).also {
+                cachedMerchantSummaries = it
+            }
+        } else {
+            cachedMerchantSummaries
+        }
+
+        val merchantDetail = if (ctrl.selectedMerchantId == null) {
+            cachedSelectedMerchantId = null
+            cachedMerchantDetail = null
+            null
+        } else if (snapChanged || ctrl.selectedMerchantId != cachedSelectedMerchantId) {
+            cachedSelectedMerchantId = ctrl.selectedMerchantId
+            repository.computeMerchantDetail(ctrl.selectedMerchantId, snap).also {
+                cachedMerchantDetail = it
+            }
+        } else {
+            cachedMerchantDetail
+        }
 
         ExtreUiState(
             activeTab = ctrl.activeTab,
             periodFilterMode = ctrl.periodFilterMode,
-            availablePeriods = availablePeriods,
+            availablePeriods = periods,
             selectedPeriod = effectivePeriod,
             selectedCategoryIdFilter = ctrl.selectedCategoryIdFilter,
             monthlyOverview = overview,
@@ -124,14 +172,16 @@ class ExtreViewModel(
             categories = snap.categories,
             merchants = snap.merchants,
             rules = snap.rules,
-            ruleSimilarityCandidatesMap = candidatesByRuleId,
+            ruleSimilarityCandidatesMap = emptyMap(),
             totalTransactionCount = snap.transactions.size,
             latestStatementMetadata = snap.latestStatementMetadata,
             pendingWizardTable = ctrl.pendingWizardTable,
             lastImportReport = ctrl.lastImportReport,
             bannerMessage = ctrl.bannerMessage
         )
-    }.stateIn(
+    }
+    .flowOn(Dispatchers.Default)
+    .stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5000),
         initialValue = ExtreUiState()
@@ -357,15 +407,27 @@ class ExtreViewModel(
         }
     }
 
-    fun approveAllCandidatesForRule(anchorRuleId: Long) {
-        val candidates = uiState.value.ruleSimilarityCandidatesMap[anchorRuleId].orEmpty()
-        if (candidates.isEmpty()) return
+    fun approveAllCandidatesForRule(anchorRuleId: Long, candidates: List<RuleMatchCandidate> = emptyList()) {
         viewModelScope.launch {
+            val listToApprove = if (candidates.isNotEmpty()) {
+                candidates
+            } else {
+                val snap = repository.snapshot.value
+                val rule = snap.rules.firstOrNull { it.id == anchorRuleId } ?: return@launch
+                RuleSimilarityAnalyzer.findCandidatesForRule(
+                    anchorRule = rule,
+                    allRules = snap.rules,
+                    merchants = snap.merchants,
+                    categories = snap.categories,
+                    queueGroups = repository.computeApprovalQueueGroups(snap)
+                )
+            }
+            if (listToApprove.isEmpty()) return@launch
             val count = withContext(Dispatchers.IO) {
-                repository.applyAllCandidatesForRule(anchorRuleId, candidates)
+                repository.applyAllCandidatesForRule(anchorRuleId, listToApprove)
             }
             controlState.value = controlState.value.copy(
-                bannerMessage = "${candidates.size} eşleşme önerisinin tamamı onaylandı ($count işlem güncellendi)."
+                bannerMessage = "${listToApprove.size} eşleşme önerisinin tamamı onaylandı ($count işlem güncellendi)."
             )
         }
     }
