@@ -5,6 +5,16 @@ enum class PeriodFilterMode {
     TRANSACTION_MONTH   // İşlem Tarihine göre (yearMonth)
 }
 
+enum class TransactionSortOption(val title: String) {
+    DATE_DESC("Tarih (En Yeni)"),
+    DATE_ASC("Tarih (En Eski)"),
+    AMOUNT_DESC("Fiyat (En Yüksek)"),
+    AMOUNT_ASC("Fiyat (En Düşük)");
+
+    val isDate: Boolean get() = this == DATE_DESC || this == DATE_ASC
+    val isAmount: Boolean get() = this == AMOUNT_DESC || this == AMOUNT_ASC
+}
+
 data class TransactionWithDetails(
     val transaction: TransactionEntity,
     val merchant: MerchantEntity? = null,

@@ -14,6 +14,7 @@ import com.example.extreapp.data.local.entity.MerchantSummaryItem
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.RuleEntity
+import com.example.extreapp.data.local.entity.TransactionSortOption
 import com.example.extreapp.data.repository.ExtreRepository
 import com.example.extreapp.data.repository.MerchantDetailData
 import com.example.extreapp.domain.engine.RuleMatchCandidate
@@ -48,6 +49,7 @@ data class ExtreUiState(
     val availablePeriods: List<String> = emptyList(),
     val selectedPeriod: String = "2026-10",
     val selectedCategoryIdFilter: Long? = null,
+    val transactionSortOption: TransactionSortOption = TransactionSortOption.DATE_DESC,
     val monthlyOverview: MonthlyOverviewSummary? = null,
     val approvalQueueGroups: List<ApprovalQueueGroup> = emptyList(),
     val unapprovedTotalCount: Int = 0,
@@ -72,6 +74,7 @@ private data class UiControlState(
     val periodFilterMode: PeriodFilterMode = PeriodFilterMode.STATEMENT_PERIOD,
     val selectedPeriod: String? = null,
     val selectedCategoryIdFilter: Long? = null,
+    val transactionSortOption: TransactionSortOption = TransactionSortOption.DATE_DESC,
     val merchantSearchQuery: String = "",
     val selectedMerchantId: Long? = null,
     val pendingWizardTable: RawStatementTable? = null,
@@ -165,6 +168,7 @@ class ExtreViewModel(
             availablePeriods = periods,
             selectedPeriod = effectivePeriod,
             selectedCategoryIdFilter = ctrl.selectedCategoryIdFilter,
+            transactionSortOption = ctrl.transactionSortOption,
             monthlyOverview = overview,
             approvalQueueGroups = queueGroups,
             unapprovedTotalCount = overview.unapprovedCount,
@@ -223,6 +227,30 @@ class ExtreViewModel(
         controlState.value = controlState.value.copy(
             selectedCategoryIdFilter = if (current == categoryId) null else categoryId
         )
+    }
+
+    fun selectTransactionSortOption(option: TransactionSortOption) {
+        controlState.value = controlState.value.copy(transactionSortOption = option)
+    }
+
+    fun toggleSortByDate() {
+        val current = controlState.value.transactionSortOption
+        val next = when (current) {
+            TransactionSortOption.DATE_DESC -> TransactionSortOption.DATE_ASC
+            TransactionSortOption.DATE_ASC -> TransactionSortOption.DATE_DESC
+            else -> TransactionSortOption.DATE_DESC
+        }
+        controlState.value = controlState.value.copy(transactionSortOption = next)
+    }
+
+    fun toggleSortByAmount() {
+        val current = controlState.value.transactionSortOption
+        val next = when (current) {
+            TransactionSortOption.AMOUNT_DESC -> TransactionSortOption.AMOUNT_ASC
+            TransactionSortOption.AMOUNT_ASC -> TransactionSortOption.AMOUNT_DESC
+            else -> TransactionSortOption.AMOUNT_DESC
+        }
+        controlState.value = controlState.value.copy(transactionSortOption = next)
     }
 
     fun updateMerchantSearch(query: String) {

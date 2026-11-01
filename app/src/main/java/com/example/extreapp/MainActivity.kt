@@ -335,6 +335,8 @@ fun ExtreAppRoot() {
                                 onSelectPeriod = { viewModel.selectPeriod(it) },
                                 onSelectPeriodMode = { viewModel.setPeriodFilterMode(it) },
                                 onToggleCategoryFilter = { viewModel.toggleCategoryFilter(it) },
+                                onToggleSortByDate = { viewModel.toggleSortByDate() },
+                                onToggleSortByAmount = { viewModel.toggleSortByAmount() },
                                 onOpenApprovalQueue = { viewModel.selectTab(AppTab.APPROVAL_QUEUE) },
                                 onOpenMerchantDetail = { viewModel.openMerchantDetail(it) }
                             )

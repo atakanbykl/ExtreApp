@@ -2,11 +2,14 @@ package com.example.extreapp
 
 import com.example.extreapp.data.local.InMemoryPersistenceStore
 import com.example.extreapp.data.local.entity.PeriodFilterMode
+import com.example.extreapp.data.local.entity.TransactionSortOption
 import com.example.extreapp.data.local.entity.TransactionType
+import com.example.extreapp.data.local.entity.TransactionWithDetails
 import com.example.extreapp.data.repository.ExtreRepository
 import com.example.extreapp.domain.engine.RuleSimilarityAnalyzer
 import com.example.extreapp.domain.parser.StatementParserDispatcher
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
@@ -253,5 +256,93 @@ class ExampleUnitTest {
 
         val maskedUsd = com.example.extreapp.ui.theme.Formatters.formatCurrency(44.48, currency = "USD", isMasked = true)
         assertEquals("***", maskedUsd)
+    }
+
+    @Test
+    fun transactionSortingByDateAndPriceTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        val overview = repo.computeMonthlyOverview("2026-10", PeriodFilterMode.STATEMENT_PERIOD)
+        val txs = overview.transactions
+        assertTrue(txs.isNotEmpty())
+
+        // 1. Sort by Date Descending (En Yeni)
+        val dateDesc = txs.sortedWith(
+            compareByDescending<TransactionWithDetails> { it.transaction.dateEpochDay }
+                .thenByDescending { it.transaction.id }
+        )
+        assertTrue(dateDesc.first().transaction.dateEpochDay >= dateDesc.last().transaction.dateEpochDay)
+
+        // 2. Sort by Date Ascending (En Eski)
+        val dateAsc = txs.sortedWith(
+            compareBy<TransactionWithDetails> { it.transaction.dateEpochDay }
+                .thenBy { it.transaction.id }
+        )
+        assertTrue(dateAsc.first().transaction.dateEpochDay <= dateAsc.last().transaction.dateEpochDay)
+
+        // 3. Sort by Amount/Price Descending (Fiyat En Yüksek)
+        val amountDesc = txs.sortedWith(
+            compareByDescending<TransactionWithDetails> { it.transaction.amount }
+                .thenByDescending { it.transaction.dateEpochDay }
+        )
+        assertEquals(56602.83, amountDesc.first().transaction.amount, 0.01)
+        assertTrue(amountDesc.first().transaction.amount >= amountDesc.last().transaction.amount)
+
+        // 4. Sort by Amount/Price Ascending (Fiyat En Düşük)
+        val amountAsc = txs.sortedWith(
+            compareBy<TransactionWithDetails> { it.transaction.amount }
+                .thenByDescending { it.transaction.dateEpochDay }
+        )
+        assertEquals(0.0, amountAsc.first().transaction.amount, 0.01)
+        assertTrue(amountAsc.first().transaction.amount <= amountAsc.last().transaction.amount)
+    }
+
+    @Test
+    fun transactionSortOptionToggleLogicTest() {
+        // Initial state is DATE_DESC
+        var currentOption = TransactionSortOption.DATE_DESC
+
+        fun toggleDate(current: TransactionSortOption): TransactionSortOption {
+            return if (current == TransactionSortOption.DATE_DESC) {
+                TransactionSortOption.DATE_ASC
+            } else {
+                TransactionSortOption.DATE_DESC
+            }
+        }
+
+        fun toggleAmount(current: TransactionSortOption): TransactionSortOption {
+            return if (current == TransactionSortOption.AMOUNT_DESC) {
+                TransactionSortOption.AMOUNT_ASC
+            } else {
+                TransactionSortOption.AMOUNT_DESC
+            }
+        }
+
+        // 1. Tapping Date when on DATE_DESC toggles to DATE_ASC
+        currentOption = toggleDate(currentOption)
+        assertEquals(TransactionSortOption.DATE_ASC, currentOption)
+        assertTrue(currentOption.isDate)
+        assertFalse(currentOption.isAmount)
+
+        // 2. Tapping Date again toggles back to DATE_DESC
+        currentOption = toggleDate(currentOption)
+        assertEquals(TransactionSortOption.DATE_DESC, currentOption)
+
+        // 3. Tapping Amount switches to AMOUNT_DESC (first click highest price)
+        currentOption = toggleAmount(currentOption)
+        assertEquals(TransactionSortOption.AMOUNT_DESC, currentOption)
+        assertTrue(currentOption.isAmount)
+        assertFalse(currentOption.isDate)
+
+        // 4. Tapping Amount again switches to AMOUNT_ASC (second click lowest price)
+        currentOption = toggleAmount(currentOption)
+        assertEquals(TransactionSortOption.AMOUNT_ASC, currentOption)
+
+        // 5. Tapping Date switches back to DATE_DESC (first click newest date)
+        currentOption = toggleDate(currentOption)
+        assertEquals(TransactionSortOption.DATE_DESC, currentOption)
     }
 }

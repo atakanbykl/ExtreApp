@@ -28,6 +28,8 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.outlined.AddCircleOutline
+import androidx.compose.material.icons.outlined.ArrowDownward
+import androidx.compose.material.icons.outlined.ArrowUpward
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.CreditCard
 import androidx.compose.material.icons.outlined.Description
@@ -47,6 +49,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -60,6 +63,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.example.extreapp.data.local.entity.CategoryBreakdownItem
 import com.example.extreapp.data.local.entity.PeriodFilterMode
+import com.example.extreapp.data.local.entity.TransactionSortOption
 import com.example.extreapp.data.local.entity.TransactionType
 import com.example.extreapp.data.local.entity.TransactionWithDetails
 import com.example.extreapp.ui.ExtreUiState
@@ -80,6 +84,8 @@ fun DashboardScreen(
     onSelectPeriod: (String) -> Unit,
     onSelectPeriodMode: (PeriodFilterMode) -> Unit,
     onToggleCategoryFilter: (Long?) -> Unit,
+    onToggleSortByDate: () -> Unit = {},
+    onToggleSortByAmount: () -> Unit = {},
     onOpenApprovalQueue: () -> Unit,
     onOpenMerchantDetail: (Long) -> Unit,
     modifier: Modifier = Modifier
@@ -103,6 +109,27 @@ fun DashboardScreen(
             item.category == null && (item.transaction.type == TransactionType.EXPENSE || item.transaction.type == TransactionType.REFUND)
         } else {
             item.category?.id == uiState.selectedCategoryIdFilter
+        }
+    }
+
+    val sortedTransactions = remember(filteredTransactions, uiState.transactionSortOption) {
+        when (uiState.transactionSortOption) {
+            TransactionSortOption.DATE_DESC -> filteredTransactions.sortedWith(
+                compareByDescending<TransactionWithDetails> { it.transaction.dateEpochDay }
+                    .thenByDescending { it.transaction.id }
+            )
+            TransactionSortOption.DATE_ASC -> filteredTransactions.sortedWith(
+                compareBy<TransactionWithDetails> { it.transaction.dateEpochDay }
+                    .thenBy { it.transaction.id }
+            )
+            TransactionSortOption.AMOUNT_DESC -> filteredTransactions.sortedWith(
+                compareByDescending<TransactionWithDetails> { it.transaction.amount }
+                    .thenByDescending { it.transaction.dateEpochDay }
+            )
+            TransactionSortOption.AMOUNT_ASC -> filteredTransactions.sortedWith(
+                compareBy<TransactionWithDetails> { it.transaction.amount }
+                    .thenByDescending { it.transaction.dateEpochDay }
+            )
         }
     }
 
@@ -338,20 +365,82 @@ fun DashboardScreen(
         // 6. Period Transactions Section
         item {
             Spacer(modifier = Modifier.height(4.dp))
-            Row(
-                modifier = Modifier.fillMaxWidth(),
-                horizontalArrangement = Arrangement.SpaceBetween,
-                verticalAlignment = Alignment.CenterVertically
-            ) {
-                Text(
-                    text = "Dönem İşlemleri (${filteredTransactions.size})",
-                    style = MaterialTheme.typography.titleLarge
-                )
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Dönem İşlemleri (${sortedTransactions.size})",
+                        style = MaterialTheme.typography.titleLarge,
+                        fontWeight = FontWeight.Bold
+                    )
+                }
+
+                Row(
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .horizontalScroll(rememberScrollState()),
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    val isDateActive = uiState.transactionSortOption.isDate
+                    val isDateAsc = uiState.transactionSortOption == TransactionSortOption.DATE_ASC
+                    FilterChip(
+                        selected = isDateActive,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleSortByDate()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (isDateActive && isDateAsc) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                if (isDateActive) {
+                                    if (isDateAsc) "Tarih (En Eski)" else "Tarih (En Yeni)"
+                                } else {
+                                    "Tarih"
+                                }
+                            )
+                        }
+                    )
+
+                    val isAmountActive = uiState.transactionSortOption.isAmount
+                    val isAmountAsc = uiState.transactionSortOption == TransactionSortOption.AMOUNT_ASC
+                    FilterChip(
+                        selected = isAmountActive,
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onToggleSortByAmount()
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = if (isAmountActive && isAmountAsc) Icons.Outlined.ArrowUpward else Icons.Outlined.ArrowDownward,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = {
+                            Text(
+                                if (isAmountActive) {
+                                    if (isAmountAsc) "Fiyat (En Düşük)" else "Fiyat (En Yüksek)"
+                                } else {
+                                    "Fiyat"
+                                }
+                            )
+                        }
+                    )
+                }
             }
         }
 
         items(
-            items = filteredTransactions,
+            items = sortedTransactions,
             key = { "tx_${it.transaction.id}" }
         ) { txDetail ->
             TransactionListItemCard(
