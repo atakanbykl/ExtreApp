@@ -2,6 +2,7 @@ package com.example.extreapp.ui.screens
 
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -18,14 +19,20 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material.icons.outlined.Add
+import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Backup
-import androidx.compose.material.icons.outlined.Category
+import androidx.compose.material.icons.outlined.Check
+import androidx.compose.material.icons.outlined.CheckCircleOutline
 import androidx.compose.material.icons.outlined.DeleteOutline
+import androidx.compose.material.icons.outlined.DoneAll
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material.icons.outlined.Refresh
@@ -56,14 +63,21 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.hapticfeedback.HapticFeedbackType
+import androidx.compose.ui.platform.LocalHapticFeedback
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
 import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.RuleEntity
+import com.example.extreapp.domain.engine.RuleMatchCandidate
+import com.example.extreapp.domain.engine.RuleMatchCandidateType
 import com.example.extreapp.ui.ExtreUiState
 import com.example.extreapp.ui.theme.AppleGreenLight
+import com.example.extreapp.ui.theme.AppleOrangeLight
 import com.example.extreapp.ui.theme.AppleRedLight
 import com.example.extreapp.ui.theme.applePressScale
 import com.example.extreapp.ui.theme.fromHex
@@ -83,8 +97,11 @@ fun RulesAndBackupScreen(
     onImportBackupClick: () -> Unit,
     onReapplyRulesClick: () -> Unit,
     onCreateRule: (keyword: String, merchantName: String, categoryId: Long, priority: Int) -> Unit,
+    onEditRule: (ruleId: Long, newKeyword: String, newMerchantName: String, newCategoryId: Long, newPriority: Int) -> Unit,
     onDeleteRule: (Long) -> Unit,
     onUpdateRulePriority: (Long, Int) -> Unit,
+    onApproveCandidateForRule: (anchorRuleId: Long, candidate: RuleMatchCandidate) -> Unit,
+    onApproveAllCandidatesForRule: (anchorRuleId: Long) -> Unit,
     onAddCategory: (name: String, colorHex: Long) -> Unit,
     onClearAllData: () -> Unit,
     modifier: Modifier = Modifier
@@ -100,6 +117,12 @@ fun RulesAndBackupScreen(
         mutableLongStateOf(uiState.categories.firstOrNull()?.id ?: 1L)
     }
 
+    // Rule currently clicked for Editing
+    var editingRuleId by remember { mutableStateOf<Long?>(null) }
+
+    // Rule currently clicked for "Eşleşme Önerisi" (Similarity Suggestions Dialog)
+    var similaritySelectedRuleId by remember { mutableStateOf<Long?>(null) }
+
     var newCategoryName by remember { mutableStateOf("") }
     val colorOptions = listOf(
         0xFF10B981L, 0xFF3B82F6L, 0xFFF59E0BL, 0xFF8B5CF6L,
@@ -110,6 +133,56 @@ fun RulesAndBackupScreen(
 
     val merchantsById = remember(uiState.merchants) { uiState.merchants.associateBy { it.id } }
     val categoriesById = remember(uiState.categories) { uiState.categories.associateBy { it.id } }
+
+    // 1. Edit Rule Modal Dialog
+    val ruleToEdit = remember(editingRuleId, uiState.rules) {
+        editingRuleId?.let { id -> uiState.rules.firstOrNull { it.id == id } }
+    }
+    if (ruleToEdit != null) {
+        val currentMerchantName = merchantsById[ruleToEdit.merchantId]?.displayName ?: ""
+        EditRuleDialog(
+            rule = ruleToEdit,
+            initialMerchantName = currentMerchantName,
+            categories = uiState.categories,
+            existingMerchants = uiState.merchants,
+            onDismiss = { editingRuleId = null },
+            onSave = { updatedKeyword, updatedMerchantName, updatedCatId, updatedPriority ->
+                onEditRule(
+                    ruleToEdit.id,
+                    updatedKeyword,
+                    updatedMerchantName,
+                    updatedCatId,
+                    updatedPriority
+                )
+                editingRuleId = null
+            }
+        )
+    }
+
+    // 2. Clicked Rule's Similarity Suggestions Dialog ("Üzerine Tıklandığında Çıkan Eşleşme Önerisi")
+    val anchorRuleForSim = remember(similaritySelectedRuleId, uiState.rules) {
+        similaritySelectedRuleId?.let { id -> uiState.rules.firstOrNull { it.id == id } }
+    }
+    if (anchorRuleForSim != null) {
+        val anchorMerchantName = merchantsById[anchorRuleForSim.merchantId]?.displayName ?: "Bilinmeyen Satıcı"
+        val anchorCategoryName = categoriesById[anchorRuleForSim.categoryId]?.name ?: "Diğer"
+        val candidates = uiState.ruleSimilarityCandidatesMap[anchorRuleForSim.id].orEmpty()
+
+        RuleSimilarityDialog(
+            anchorRule = anchorRuleForSim,
+            anchorMerchantName = anchorMerchantName,
+            anchorCategoryName = anchorCategoryName,
+            candidates = candidates,
+            onApproveSingle = { candidate ->
+                onApproveCandidateForRule(anchorRuleForSim.id, candidate)
+            },
+            onApproveAll = {
+                onApproveAllCandidatesForRule(anchorRuleForSim.id)
+                similaritySelectedRuleId = null
+            },
+            onDismiss = { similaritySelectedRuleId = null }
+        )
+    }
 
     if (showClearConfirmDialog) {
         AlertDialog(
@@ -216,7 +289,7 @@ fun RulesAndBackupScreen(
                                     fontWeight = FontWeight.Bold
                                 )
                                 Text(
-                                    text = "İçe aktarılan işlem açıklamaları buradaki anahtar kelimelerle (contains) karşılaştırılır. Öncelik puanı yüksek olan kural her zaman önce çalışır.",
+                                    text = "Herhangi bir kuralın üzerine dokunarak o kuralla aynı satıcıyı işaret edebilecek benzer kuralları ve işlemleri görebilirsiniz.",
                                     style = MaterialTheme.typography.bodyMedium,
                                     color = MaterialTheme.colorScheme.onSurfaceVariant
                                 )
@@ -257,7 +330,7 @@ fun RulesAndBackupScreen(
                         }
                     }
 
-                    // Expandable New Rule Form (Stacked vertically for clean readability)
+                    // Expandable New Rule Form
                     if (showAddRuleForm) {
                         item {
                             Card(
@@ -402,10 +475,15 @@ fun RulesAndBackupScreen(
                         ) { rule ->
                             val merchantName = merchantsById[rule.merchantId]?.displayName ?: "Bilinmeyen Satıcı"
                             val category = categoriesById[rule.categoryId]
+                            val similarityCount = uiState.ruleSimilarityCandidatesMap[rule.id]?.size ?: 0
+
                             RuleItemCard(
                                 rule = rule,
                                 merchantName = merchantName,
                                 category = category,
+                                similarityCount = similarityCount,
+                                onOpenSimilaritySuggestions = { similaritySelectedRuleId = rule.id },
+                                onEdit = { editingRuleId = rule.id },
                                 onIncreasePriority = { onUpdateRulePriority(rule.id, rule.priority + 5) },
                                 onDecreasePriority = { onUpdateRulePriority(rule.id, (rule.priority - 5).coerceAtLeast(1)) },
                                 onDelete = { onDeleteRule(rule.id) }
@@ -421,7 +499,6 @@ fun RulesAndBackupScreen(
                     contentPadding = PaddingValues(bottom = 20.dp),
                     verticalArrangement = Arrangement.spacedBy(12.dp)
                 ) {
-                    // Add Category Card
                     item {
                         Card(
                             shape = RoundedCornerShape(18.dp),
@@ -495,7 +572,6 @@ fun RulesAndBackupScreen(
                         }
                     }
 
-                    // Existing Categories List
                     items(
                         items = uiState.categories,
                         key = { "cat_list_${it.id}" }
@@ -605,7 +681,6 @@ fun RulesAndBackupScreen(
                                     }
                                 }
 
-                                // 3-Column Database Stats Boxes
                                 Row(
                                     modifier = Modifier.fillMaxWidth(),
                                     horizontalArrangement = Arrangement.spacedBy(8.dp)
@@ -717,6 +792,362 @@ fun RulesAndBackupScreen(
     }
 }
 
+/**
+ * Dialog that opens when a user clicks on a Rule or its "Eşleşme Önerisi" button.
+ * Shows similar saved rules and similar unapproved transactions that may refer to the same merchant,
+ * allowing single approval ("Onayla") or batch approval ("Hepsini Onayla").
+ */
+@Composable
+private fun RuleSimilarityDialog(
+    anchorRule: RuleEntity,
+    anchorMerchantName: String,
+    anchorCategoryName: String,
+    candidates: List<RuleMatchCandidate>,
+    onApproveSingle: (RuleMatchCandidate) -> Unit,
+    onApproveAll: () -> Unit,
+    onDismiss: () -> Unit
+) {
+    val haptic = LocalHapticFeedback.current
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(42.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Eşleşme Önerileri",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "\"${anchorRule.keyword}\" → $anchorMerchantName ($anchorCategoryName)",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontWeight = FontWeight.SemiBold
+                        )
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                if (candidates.isEmpty()) {
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(vertical = 18.dp),
+                        horizontalAlignment = Alignment.CenterHorizontally,
+                        verticalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.CheckCircleOutline,
+                            contentDescription = null,
+                            tint = AppleGreenLight,
+                            modifier = Modifier.size(36.dp)
+                        )
+                        Text(
+                            text = "Benzer Kayıt Bulunamadı",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Bu kuralla benzerlik gösteren başka bir kural veya onay bekleyen tanımsız işlem bulunmuyor.",
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            textAlign = TextAlign.Center
+                        )
+                    }
+                } else {
+                    Text(
+                        text = "Bu kuralla benzerlik gösteren ve aynı yeri ($anchorMerchantName) işaret edebilecek ${candidates.size} kayıt bulundu:",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Button(
+                        onClick = {
+                            haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                            onApproveAll()
+                        },
+                        shape = RoundedCornerShape(14.dp),
+                        modifier = Modifier.fillMaxWidth(),
+                        contentPadding = PaddingValues(vertical = 12.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.DoneAll,
+                            contentDescription = null,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text(
+                            text = "Hepsini Onayla (${candidates.size} Öneri)",
+                            fontWeight = FontWeight.Bold
+                        )
+                    }
+
+                    candidates.forEach { candidate ->
+                        Surface(
+                            shape = RoundedCornerShape(14.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.5f),
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Column(
+                                modifier = Modifier.padding(14.dp),
+                                verticalArrangement = Arrangement.spacedBy(8.dp)
+                            ) {
+                                Row(
+                                    modifier = Modifier.fillMaxWidth(),
+                                    horizontalArrangement = Arrangement.SpaceBetween,
+                                    verticalAlignment = Alignment.CenterVertically
+                                ) {
+                                    BadgePill(
+                                        text = if (candidate.type == RuleMatchCandidateType.SIMILAR_SAVED_RULE) {
+                                            "Kayıtlı Kural"
+                                        } else {
+                                            "Tanımsız İşlem"
+                                        },
+                                        color = if (candidate.type == RuleMatchCandidateType.SIMILAR_SAVED_RULE) {
+                                            MaterialTheme.colorScheme.primary
+                                        } else {
+                                            AppleOrangeLight
+                                        }
+                                    )
+                                    BadgePill(
+                                        text = "%${candidate.similarityPercent} Benzerlik",
+                                        color = AppleGreenLight
+                                    )
+                                }
+
+                                Text(
+                                    text = candidate.displayKeywordOrDesc,
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+
+                                Text(
+                                    text = "${candidate.currentStatusText} • ${candidate.reason}",
+                                    style = MaterialTheme.typography.bodyMedium,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+
+                                OutlinedButton(
+                                    onClick = {
+                                        haptic.performHapticFeedback(HapticFeedbackType.LongPress)
+                                        onApproveSingle(candidate)
+                                    },
+                                    shape = RoundedCornerShape(10.dp),
+                                    modifier = Modifier.fillMaxWidth(),
+                                    contentPadding = PaddingValues(vertical = 8.dp)
+                                ) {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Check,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                    Spacer(modifier = Modifier.width(6.dp))
+                                    Text("\"$anchorMerchantName\" Olarak Onayla")
+                                }
+                            }
+                        }
+                    }
+                }
+
+                OutlinedButton(
+                    onClick = onDismiss,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Text("Kapat")
+                }
+            }
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditRuleDialog(
+    rule: RuleEntity,
+    initialMerchantName: String,
+    categories: List<CategoryEntity>,
+    existingMerchants: List<MerchantEntity>,
+    onDismiss: () -> Unit,
+    onSave: (keyword: String, merchantName: String, categoryId: Long, priority: Int) -> Unit
+) {
+    var keyword by remember(rule) { mutableStateOf(rule.keyword) }
+    var merchantName by remember(rule, initialMerchantName) { mutableStateOf(initialMerchantName) }
+    var selectedCategoryId by remember(rule) { mutableLongStateOf(rule.categoryId) }
+    var priorityText by remember(rule) { mutableStateOf(rule.priority.toString()) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp)
+            ) {
+                Text(
+                    text = "Kuralı Düzenle",
+                    style = MaterialTheme.typography.titleLarge,
+                    fontWeight = FontWeight.Bold
+                )
+
+                OutlinedTextField(
+                    value = keyword,
+                    onValueChange = { keyword = it },
+                    label = { Text("Anahtar Kelime (Contains)") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                OutlinedTextField(
+                    value = merchantName,
+                    onValueChange = { merchantName = it },
+                    label = { Text("Satıcı Adı") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                if (existingMerchants.isNotEmpty()) {
+                    Text(
+                        text = "Mevcut Satıcılardan Seç:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        existingMerchants.forEach { m ->
+                            val isSelected = merchantName.equals(m.displayName, ignoreCase = true)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primaryContainer
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f)
+                                },
+                                modifier = Modifier.applePressScale {
+                                    merchantName = m.displayName
+                                    m.defaultCategoryId?.let { selectedCategoryId = it }
+                                }
+                            ) {
+                                Text(
+                                    text = m.displayName,
+                                    style = MaterialTheme.typography.labelMedium,
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                OutlinedTextField(
+                    value = priorityText,
+                    onValueChange = { priorityText = it.filter { ch -> ch.isDigit() } },
+                    label = { Text("Öncelik Puanı") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                Text(
+                    text = "Kategori:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    categories.forEach { cat ->
+                        val isSel = cat.id == selectedCategoryId
+                        val c = Color.fromHex(cat.colorHex)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSel) c.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .then(
+                                    if (isSel) Modifier.border(1.5.dp, c, RoundedCornerShape(10.dp)) else Modifier
+                                )
+                                .applePressScale { selectedCategoryId = cat.id }
+                        ) {
+                            Text(
+                                text = cat.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                            )
+                        }
+                    }
+                }
+
+                HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("İptal")
+                    }
+                    Button(
+                        onClick = {
+                            val prio = priorityText.toIntOrNull() ?: rule.priority
+                            onSave(keyword.trim(), merchantName.trim(), selectedCategoryId, prio)
+                        },
+                        enabled = keyword.isNotBlank() && merchantName.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1.2f)
+                    ) {
+                        Text("Kaydet")
+                    }
+                }
+            }
+        }
+    }
+}
+
 @Composable
 private fun StatBox(
     label: String,
@@ -753,6 +1184,9 @@ private fun RuleItemCard(
     rule: RuleEntity,
     merchantName: String,
     category: CategoryEntity?,
+    similarityCount: Int,
+    onOpenSimilaritySuggestions: () -> Unit,
+    onEdit: () -> Unit,
     onIncreasePriority: () -> Unit,
     onDecreasePriority: () -> Unit,
     onDelete: () -> Unit
@@ -763,7 +1197,9 @@ private fun RuleItemCard(
     Card(
         shape = RoundedCornerShape(18.dp),
         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
-        modifier = Modifier.fillMaxWidth()
+        modifier = Modifier
+            .fillMaxWidth()
+            .applePressScale(onClick = onOpenSimilaritySuggestions)
     ) {
         Column(
             modifier = Modifier
@@ -771,13 +1207,53 @@ private fun RuleItemCard(
                 .padding(16.dp),
             verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
-            // Top section: Keyword container
-            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                Text(
-                    text = "EŞLEŞEN ANAHTAR KELİME (CONTAINS)",
-                    style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
-                )
+            // Top section: Keyword container + Similarity indicator pill
+            Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "EŞLEŞEN ANAHTAR KELİME",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (similarityCount > 0) {
+                            AppleOrangeLight.copy(alpha = 0.16f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        },
+                        modifier = Modifier.applePressScale(onClick = onOpenSimilaritySuggestions)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.AutoAwesome,
+                                contentDescription = null,
+                                tint = if (similarityCount > 0) AppleOrangeLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                            Text(
+                                text = if (similarityCount > 0) {
+                                    "Eşleşme Önerisi ($similarityCount)"
+                                } else {
+                                    "Eşleşme Önerisi"
+                                },
+                                style = MaterialTheme.typography.labelSmall,
+                                color = if (similarityCount > 0) AppleOrangeLight else MaterialTheme.colorScheme.onSurfaceVariant,
+                                fontWeight = FontWeight.Bold
+                            )
+                        }
+                    }
+                }
+
                 Surface(
                     shape = RoundedCornerShape(10.dp),
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.55f),
@@ -850,7 +1326,7 @@ private fun RuleItemCard(
 
             HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
-            // Bottom Action Bar: Priority Stepper on Left, Delete Button on Right
+            // Bottom Action Bar: Priority Stepper on Left, Edit + Delete Buttons on Right
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
@@ -899,28 +1375,58 @@ private fun RuleItemCard(
                     }
                 }
 
-                Surface(
-                    shape = RoundedCornerShape(10.dp),
-                    color = AppleRedLight.copy(alpha = 0.12f),
-                    modifier = Modifier.applePressScale(onClick = onDelete)
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
                 ) {
-                    Row(
-                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(4.dp)
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.7f),
+                        modifier = Modifier.applePressScale(onClick = onEdit)
                     ) {
-                        Icon(
-                            imageVector = Icons.Outlined.DeleteOutline,
-                            contentDescription = "Kuralı Sil",
-                            tint = AppleRedLight,
-                            modifier = Modifier.size(16.dp)
-                        )
-                        Text(
-                            text = "Kuralı Sil",
-                            style = MaterialTheme.typography.labelMedium,
-                            color = AppleRedLight,
-                            fontWeight = FontWeight.SemiBold
-                        )
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.Edit,
+                                contentDescription = "Kuralı Düzenle",
+                                tint = MaterialTheme.colorScheme.primary,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Düzenle",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = MaterialTheme.colorScheme.primary,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
+                    }
+
+                    Surface(
+                        shape = RoundedCornerShape(10.dp),
+                        color = AppleRedLight.copy(alpha = 0.12f),
+                        modifier = Modifier.applePressScale(onClick = onDelete)
+                    ) {
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(4.dp)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Outlined.DeleteOutline,
+                                contentDescription = "Kuralı Sil",
+                                tint = AppleRedLight,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Text(
+                                text = "Sil",
+                                style = MaterialTheme.typography.labelMedium,
+                                color = AppleRedLight,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                        }
                     }
                 }
             }

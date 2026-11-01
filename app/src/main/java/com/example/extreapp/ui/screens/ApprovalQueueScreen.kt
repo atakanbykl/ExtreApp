@@ -214,16 +214,16 @@ private fun ApprovalQueueGroupCard(
             modifier = Modifier.padding(18.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            // Header: Raw description & total amount / count
             Row(
                 modifier = Modifier.fillMaxWidth(),
                 horizontalArrangement = Arrangement.SpaceBetween,
                 verticalAlignment = Alignment.Top
             ) {
                 Column(modifier = Modifier.weight(1f)) {
-                    Row(
-                        verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    FlowRow(
+                        horizontalArrangement = Arrangement.spacedBy(8.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp),
+                        itemVerticalAlignment = Alignment.CenterVertically
                     ) {
                         BadgePill(
                             text = "${group.transactions.size} İşlem",
@@ -253,7 +253,6 @@ private fun ApprovalQueueGroupCard(
                 )
             }
 
-            // Expandable transaction list if group has multiple transactions
             if (group.transactions.size > 1) {
                 Surface(
                     shape = RoundedCornerShape(12.dp),
@@ -318,7 +317,6 @@ private fun ApprovalQueueGroupCard(
                 }
             }
 
-            // Existing Merchant Quick-Picker (if user already created merchants, e.g., wants to link SBUX to Starbucks)
             if (existingMerchants.isNotEmpty()) {
                 Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text(
@@ -369,7 +367,6 @@ private fun ApprovalQueueGroupCard(
                 }
             }
 
-            // Merchant Name & Rule Keyword TextFields (Stacked vertically for clean readability)
             Column(
                 modifier = Modifier.fillMaxWidth(),
                 verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -392,7 +389,6 @@ private fun ApprovalQueueGroupCard(
                 )
             }
 
-            // Category Selector Chips
             Text(
                 text = "Kategori Seçin",
                 style = MaterialTheme.typography.labelMedium,
@@ -507,4 +503,3 @@ private fun inferSuggestedCategoryId(
         else -> null
     } ?: categories.firstOrNull()?.id ?: 1L
 }
-

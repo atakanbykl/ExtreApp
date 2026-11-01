@@ -363,8 +363,23 @@ fun ExtreAppRoot() {
                                         applyRetroactively = true
                                     )
                                 },
+                                onEditRule = { ruleId, newKeyword, newMerchantName, newCatId, newPrio ->
+                                    viewModel.editExistingRule(
+                                        ruleId = ruleId,
+                                        newKeyword = newKeyword,
+                                        newMerchantDisplayName = newMerchantName,
+                                        newCategoryId = newCatId,
+                                        newPriority = newPrio
+                                    )
+                                },
                                 onDeleteRule = { viewModel.deleteRule(it) },
                                 onUpdateRulePriority = { id, newPrio -> viewModel.updateRulePriority(id, newPrio) },
+                                onApproveCandidateForRule = { anchorRuleId, candidate ->
+                                    viewModel.approveCandidateForRule(anchorRuleId, candidate)
+                                },
+                                onApproveAllCandidatesForRule = { anchorRuleId ->
+                                    viewModel.approveAllCandidatesForRule(anchorRuleId)
+                                },
                                 onAddCategory = { name, hex ->
                                     viewModel.addCustomCategory(name, "Category", hex)
                                 },

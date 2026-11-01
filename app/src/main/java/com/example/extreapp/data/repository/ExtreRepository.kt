@@ -17,6 +17,8 @@ import com.example.extreapp.data.local.entity.TransactionWithDetails
 import com.example.extreapp.domain.backup.BackupManager
 import com.example.extreapp.domain.backup.BackupRestoreReport
 import com.example.extreapp.domain.backup.ExtreBackupPayload
+import com.example.extreapp.domain.engine.RuleMatchCandidate
+import com.example.extreapp.domain.engine.RuleMatchCandidateType
 import com.example.extreapp.domain.engine.RuleMatchingEngine
 import com.example.extreapp.domain.engine.SmartKeywordExtractor
 import com.example.extreapp.domain.engine.TurkishTextNormalizer
@@ -232,6 +234,141 @@ class ExtreRepository(
             transactions = updatedTransactions
         )
         return affectedCount
+    }
+
+    @Synchronized
+    fun editRule(
+        ruleId: Long,
+        newKeyword: String,
+        newMerchantDisplayName: String,
+        newCategoryId: Long,
+        newPriority: Int,
+        reapplyToTransactions: Boolean = true
+    ): Int {
+        val current = _snapshot.value
+        val existingRule = current.rules.firstOrNull { it.id == ruleId } ?: return 0
+        val cleanMerchantName = newMerchantDisplayName.trim().ifEmpty { "Bilinmeyen Satıcı" }
+        val normalizedMerchant = TurkishTextNormalizer.normalize(cleanMerchantName)
+        val cleanKeyword = newKeyword.trim().ifEmpty { existingRule.keyword }
+
+        // 1. Find or create Merchant
+        val updatedMerchants = current.merchants.toMutableList()
+        var merchant = updatedMerchants.firstOrNull { it.normalizedName == normalizedMerchant }
+        if (merchant == null) {
+            val nextMerchantId = (updatedMerchants.maxOfOrNull { it.id } ?: 0L) + 1L
+            merchant = MerchantEntity(
+                id = nextMerchantId,
+                displayName = cleanMerchantName,
+                normalizedName = normalizedMerchant,
+                defaultCategoryId = newCategoryId
+            )
+            updatedMerchants.add(merchant)
+        } else {
+            val idx = updatedMerchants.indexOfFirst { it.id == merchant!!.id }
+            merchant = merchant.copy(
+                displayName = cleanMerchantName,
+                defaultCategoryId = newCategoryId
+            )
+            updatedMerchants[idx] = merchant
+        }
+
+        // 2. Update the Rule
+        val updatedRule = existingRule.copy(
+            keyword = cleanKeyword,
+            merchantId = merchant.id,
+            categoryId = newCategoryId,
+            priority = newPriority
+        )
+        val updatedRules = current.rules.map { if (it.id == ruleId) updatedRule else it }
+
+        // 3. Re-evaluate transactions
+        val updatedTransactions = if (reapplyToTransactions) {
+            // Reset transactions that were previously matched by this rule so if keyword narrowed, they are re-checked
+            val resetTxs = current.transactions.map { tx ->
+                if (tx.matchedRuleId == ruleId) {
+                    tx.copy(merchantId = null, categoryId = null, matchedRuleId = null, isApproved = false)
+                } else {
+                    tx
+                }
+            }
+            ruleEngine.applyRulesToTransactions(
+                transactions = resetTxs,
+                rules = updatedRules,
+                overrideAlreadyApproved = true
+            )
+        } else {
+            current.transactions
+        }
+
+        val affectedCount = updatedTransactions.count { it.matchedRuleId == ruleId }
+        updateAndPersist(
+            merchants = updatedMerchants,
+            rules = updatedRules,
+            transactions = updatedTransactions
+        )
+        return affectedCount
+    }
+
+    @Synchronized
+    fun applyCandidateForRule(
+        anchorRuleId: Long,
+        candidate: RuleMatchCandidate
+    ): Int {
+        val current = _snapshot.value
+        val anchorRule = current.rules.firstOrNull { it.id == anchorRuleId } ?: return 0
+        val anchorMerchant = current.merchants.firstOrNull { it.id == anchorRule.merchantId }
+        val anchorMerchantName = anchorMerchant?.displayName ?: anchorRule.keyword
+
+        return when (candidate.type) {
+            RuleMatchCandidateType.SIMILAR_SAVED_RULE -> {
+                val otherRule = candidate.matchedOtherRule ?: return 0
+                val updatedRules = current.rules.map { r ->
+                    if (r.id == otherRule.id) {
+                        r.copy(
+                            merchantId = anchorRule.merchantId,
+                            categoryId = anchorRule.categoryId
+                        )
+                    } else {
+                        r
+                    }
+                }
+                val updatedTransactions = ruleEngine.applyRulesToTransactions(
+                    transactions = current.transactions,
+                    rules = updatedRules,
+                    overrideAlreadyApproved = true
+                )
+                val affectedCount = updatedTransactions.count { it.merchantId == anchorRule.merchantId }
+                updateAndPersist(
+                    rules = updatedRules,
+                    transactions = updatedTransactions
+                )
+                affectedCount
+            }
+
+            RuleMatchCandidateType.SIMILAR_UNAPPROVED_TX -> {
+                val explicitIds = candidate.matchedQueueGroup?.transactions?.mapTo(HashSet()) { it.id }.orEmpty()
+                approveAndCreateRule(
+                    keyword = candidate.suggestedKeywordToBind,
+                    merchantDisplayName = anchorMerchantName,
+                    categoryId = anchorRule.categoryId,
+                    priority = anchorRule.priority,
+                    explicitTransactionIds = explicitIds,
+                    applyToPastApprovedTransactions = false
+                )
+            }
+        }
+    }
+
+    @Synchronized
+    fun applyAllCandidatesForRule(
+        anchorRuleId: Long,
+        candidates: List<RuleMatchCandidate>
+    ): Int {
+        var total = 0
+        for (c in candidates) {
+            total += applyCandidateForRule(anchorRuleId, c)
+        }
+        return total
     }
 
     @Synchronized

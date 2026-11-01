@@ -4,6 +4,7 @@ import com.example.extreapp.data.local.InMemoryPersistenceStore
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.TransactionType
 import com.example.extreapp.data.repository.ExtreRepository
+import com.example.extreapp.domain.engine.RuleSimilarityAnalyzer
 import com.example.extreapp.domain.parser.StatementParserDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertNotNull
@@ -145,5 +146,79 @@ class ExampleUnitTest {
         val overviewAfter = repo.computeMonthlyOverview("2026-10", PeriodFilterMode.STATEMENT_PERIOD)
         assertEquals(overviewBefore.netExpenseTotal, overviewAfter.netExpenseTotal, 0.01)
         assertEquals(overviewBefore.unapprovedCount, overviewAfter.unapprovedCount)
+    }
+
+    @Test
+    fun ruleSimilaritySuggestionsAndRuleEditingTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        // 1. Create a rule for "METRO GROSMARKET" -> "Metro Market" and another rule for "STARBUCKS" -> "Starbucks Coffee"
+        repo.approveAndCreateRule(
+            keyword = "METRO GROSMARKET",
+            merchantDisplayName = "Metro Market",
+            categoryId = 1L
+        )
+        repo.approveAndCreateRule(
+            keyword = "STARBUCKS",
+            merchantDisplayName = "Starbucks Coffee",
+            categoryId = 2L
+        )
+        // Also create a separate rule for "ERYAMAN PETROL" -> "Eryaman Petrol A" and "ERYAMAN P" -> "Halköde Eryaman B"
+        repo.approveAndCreateRule(
+            keyword = "ERYAMAN PETROL",
+            merchantDisplayName = "Eryaman Petrol A",
+            categoryId = 3L
+        )
+        repo.approveAndCreateRule(
+            keyword = "ERYAMAN P",
+            merchantDisplayName = "Halköde Eryaman B",
+            categoryId = 3L
+        )
+
+        // 2. When clicking on the "STARBUCKS" rule in the Rules tab, findCandidatesForRule should find "SBUX"
+        val snap1 = repo.snapshot.value
+        val queueGroups = repo.computeApprovalQueueGroups(snap1)
+        val starbucksRule = snap1.rules.first { it.keyword == "STARBUCKS" }
+        val starbucksCandidates = RuleSimilarityAnalyzer.findCandidatesForRule(
+            anchorRule = starbucksRule,
+            allRules = snap1.rules,
+            merchants = snap1.merchants,
+            categories = snap1.categories,
+            queueGroups = queueGroups
+        )
+        assertTrue(starbucksCandidates.any { it.suggestedKeywordToBind.contains("SBUX") })
+
+        // Approve All candidates for the Starbucks rule ("Hepsini Onayla")
+        val approvedCount = repo.applyAllCandidatesForRule(starbucksRule.id, starbucksCandidates)
+        assertTrue(approvedCount >= 1)
+
+        // 3. When clicking on the "ERYAMAN PETROL" rule, findCandidatesForRule should find the saved "ERYAMAN P" rule
+        val snap2 = repo.snapshot.value
+        val eryamanRule = snap2.rules.first { it.keyword == "ERYAMAN PETROL" }
+        val eryamanCandidates = RuleSimilarityAnalyzer.findCandidatesForRule(
+            anchorRule = eryamanRule,
+            allRules = snap2.rules,
+            merchants = snap2.merchants,
+            categories = snap2.categories,
+            queueGroups = repo.computeApprovalQueueGroups(snap2)
+        )
+        assertTrue(eryamanCandidates.isNotEmpty())
+        repo.applyAllCandidatesForRule(eryamanRule.id, eryamanCandidates)
+
+        // 4. Test Editing an Existing Rule
+        repo.editRule(
+            ruleId = starbucksRule.id,
+            newKeyword = "STARBUCKS",
+            newMerchantDisplayName = "Starbucks Türkiye",
+            newCategoryId = 2L,
+            newPriority = 25
+        )
+        val updatedRule = repo.snapshot.value.rules.first { it.id == starbucksRule.id }
+        assertEquals(25, updatedRule.priority)
+        val updatedMerchant = repo.snapshot.value.merchants.first { it.id == updatedRule.merchantId }
+        assertEquals("Starbucks Türkiye", updatedMerchant.displayName)
     }
 }

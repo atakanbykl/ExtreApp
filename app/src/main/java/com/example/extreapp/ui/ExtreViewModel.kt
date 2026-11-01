@@ -16,6 +16,8 @@ import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.RuleEntity
 import com.example.extreapp.data.repository.ExtreRepository
 import com.example.extreapp.data.repository.MerchantDetailData
+import com.example.extreapp.domain.engine.RuleMatchCandidate
+import com.example.extreapp.domain.engine.RuleSimilarityAnalyzer
 import com.example.extreapp.domain.parser.ColumnMapping
 import com.example.extreapp.domain.parser.RawStatementTable
 import com.example.extreapp.domain.parser.StatementHeaderMetadata
@@ -54,6 +56,7 @@ data class ExtreUiState(
     val categories: List<CategoryEntity> = emptyList(),
     val merchants: List<MerchantEntity> = emptyList(),
     val rules: List<RuleEntity> = emptyList(),
+    val ruleSimilarityCandidatesMap: Map<Long, List<RuleMatchCandidate>> = emptyMap(),
     val totalTransactionCount: Int = 0,
     val latestStatementMetadata: StatementHeaderMetadata? = null,
     val pendingWizardTable: RawStatementTable? = null,
@@ -98,6 +101,12 @@ class ExtreViewModel(
         val merchantDetail = ctrl.selectedMerchantId?.let {
             repository.computeMerchantDetail(it, snap)
         }
+        val candidatesByRuleId = RuleSimilarityAnalyzer.computeCandidatesMapForAllRules(
+            allRules = snap.rules,
+            merchants = snap.merchants,
+            categories = snap.categories,
+            queueGroups = queueGroups
+        )
 
         ExtreUiState(
             activeTab = ctrl.activeTab,
@@ -115,6 +124,7 @@ class ExtreViewModel(
             categories = snap.categories,
             merchants = snap.merchants,
             rules = snap.rules,
+            ruleSimilarityCandidatesMap = candidatesByRuleId,
             totalTransactionCount = snap.transactions.size,
             latestStatementMetadata = snap.latestStatementMetadata,
             pendingWizardTable = ctrl.pendingWizardTable,
@@ -305,6 +315,57 @@ class ExtreViewModel(
             }
             controlState.value = controlState.value.copy(
                 bannerMessage = "Kural kaydedildi ($count işlem eşleşti)."
+            )
+        }
+    }
+
+    fun editExistingRule(
+        ruleId: Long,
+        newKeyword: String,
+        newMerchantDisplayName: String,
+        newCategoryId: Long,
+        newPriority: Int
+    ) {
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                repository.editRule(
+                    ruleId = ruleId,
+                    newKeyword = newKeyword,
+                    newMerchantDisplayName = newMerchantDisplayName,
+                    newCategoryId = newCategoryId,
+                    newPriority = newPriority,
+                    reapplyToTransactions = true
+                )
+            }
+            controlState.value = controlState.value.copy(
+                bannerMessage = "Kural güncellendi ($count işlem bu kuralla eşleşti)."
+            )
+        }
+    }
+
+    fun approveCandidateForRule(
+        anchorRuleId: Long,
+        candidate: RuleMatchCandidate
+    ) {
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                repository.applyCandidateForRule(anchorRuleId, candidate)
+            }
+            controlState.value = controlState.value.copy(
+                bannerMessage = "Eşleşme önerisi onaylandı ($count işlem güncellendi)."
+            )
+        }
+    }
+
+    fun approveAllCandidatesForRule(anchorRuleId: Long) {
+        val candidates = uiState.value.ruleSimilarityCandidatesMap[anchorRuleId].orEmpty()
+        if (candidates.isEmpty()) return
+        viewModelScope.launch {
+            val count = withContext(Dispatchers.IO) {
+                repository.applyAllCandidatesForRule(anchorRuleId, candidates)
+            }
+            controlState.value = controlState.value.copy(
+                bannerMessage = "${candidates.size} eşleşme önerisinin tamamı onaylandı ($count işlem güncellendi)."
             )
         }
     }
