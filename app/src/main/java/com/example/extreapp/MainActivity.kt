@@ -20,11 +20,11 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.outlined.Rule
 import androidx.compose.material.icons.outlined.AutoAwesome
 import androidx.compose.material.icons.outlined.Close
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material.icons.outlined.PendingActions
-import androidx.compose.material.icons.outlined.Rule
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material.icons.outlined.Visibility
@@ -272,7 +272,7 @@ fun ExtreAppRoot() {
                     selected = uiState.activeTab == AppTab.RULES_AND_BACKUP,
                     onClick = { viewModel.selectTab(AppTab.RULES_AND_BACKUP) },
                     icon = {
-                        Icon(imageVector = Icons.Outlined.Rule, contentDescription = null)
+                        Icon(imageVector = Icons.AutoMirrored.Outlined.Rule, contentDescription = null)
                     },
                     label = { Text("Kurallar & Yedek") }
                 )
@@ -358,6 +358,13 @@ fun ExtreAppRoot() {
                                 onSearchQueryChange = { viewModel.updateMerchantSearch(it) },
                                 onSelectMerchant = { viewModel.openMerchantDetail(it) },
                                 onBackFromDetail = { viewModel.closeMerchantDetail() },
+                                onEditMerchant = { merchantId, newDisplayName, newCategoryId ->
+                                    viewModel.editExistingMerchant(
+                                        merchantId = merchantId,
+                                        newDisplayName = newDisplayName,
+                                        newCategoryId = newCategoryId
+                                    )
+                                },
                                 onAddKeywordRuleForMerchant = { keyword, merchantName, categoryId ->
                                     viewModel.createOrUpdateRule(
                                         keyword = keyword,

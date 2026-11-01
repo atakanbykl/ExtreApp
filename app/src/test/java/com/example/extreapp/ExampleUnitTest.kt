@@ -220,6 +220,22 @@ class ExampleUnitTest {
         assertEquals(25, updatedRule.priority)
         val updatedMerchant = repo.snapshot.value.merchants.first { it.id == updatedRule.merchantId }
         assertEquals("Starbucks Türkiye", updatedMerchant.displayName)
+
+        // 5. Test Editing a Merchant from the Merchant Detail screen (rename & change category)
+        val editedMerchantId = repo.editMerchant(
+            merchantId = updatedMerchant.id,
+            newDisplayName = "Starbucks Coffee TR",
+            newCategoryId = 4L
+        )
+        assertEquals(updatedMerchant.id, editedMerchantId)
+        val renamedMerchant = repo.snapshot.value.merchants.first { it.id == editedMerchantId }
+        assertEquals("Starbucks Coffee TR", renamedMerchant.displayName)
+        assertEquals(4L, renamedMerchant.defaultCategoryId)
+        assertTrue(
+            repo.snapshot.value.transactions
+                .filter { it.merchantId == editedMerchantId }
+                .all { it.categoryId == 4L }
+        )
     }
 
     @Test

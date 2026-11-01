@@ -310,6 +310,81 @@ class ExtreRepository(
     }
 
     @Synchronized
+    fun editMerchant(
+        merchantId: Long,
+        newDisplayName: String,
+        newCategoryId: Long
+    ): Long {
+        val current = _snapshot.value
+        val existingMerchant = current.merchants.firstOrNull { it.id == merchantId } ?: return merchantId
+        val cleanName = newDisplayName.trim().ifEmpty { existingMerchant.displayName }
+        val normalizedName = TurkishTextNormalizer.normalize(cleanName)
+
+        // Check if another merchant already has this normalizedName (merge into existing merchant)
+        val collisionMerchant = current.merchants.firstOrNull {
+            it.id != merchantId && it.normalizedName == normalizedName
+        }
+
+        val targetMerchantId: Long
+        val updatedMerchants: List<MerchantEntity>
+
+        if (collisionMerchant != null) {
+            targetMerchantId = collisionMerchant.id
+            updatedMerchants = current.merchants
+                .filterNot { it.id == merchantId }
+                .map { m ->
+                    if (m.id == targetMerchantId) {
+                        m.copy(displayName = cleanName, defaultCategoryId = newCategoryId)
+                    } else {
+                        m
+                    }
+                }
+        } else {
+            targetMerchantId = merchantId
+            updatedMerchants = current.merchants.map { m ->
+                if (m.id == merchantId) {
+                    m.copy(
+                        displayName = cleanName,
+                        normalizedName = normalizedName,
+                        defaultCategoryId = newCategoryId
+                    )
+                } else {
+                    m
+                }
+            }
+        }
+
+        val updatedRules = current.rules.map { rule ->
+            if (rule.merchantId == merchantId || rule.merchantId == targetMerchantId) {
+                rule.copy(
+                    merchantId = targetMerchantId,
+                    categoryId = newCategoryId
+                )
+            } else {
+                rule
+            }
+        }
+
+        val updatedTransactions = current.transactions.map { tx ->
+            if (tx.merchantId == merchantId || tx.merchantId == targetMerchantId) {
+                tx.copy(
+                    merchantId = targetMerchantId,
+                    categoryId = newCategoryId
+                )
+            } else {
+                tx
+            }
+        }
+
+        updateAndPersist(
+            merchants = updatedMerchants,
+            rules = updatedRules,
+            transactions = updatedTransactions
+        )
+        return targetMerchantId
+    }
+
+    @Synchronized
     fun applyCandidateForRule(
         anchorRuleId: Long,
         candidate: RuleMatchCandidate

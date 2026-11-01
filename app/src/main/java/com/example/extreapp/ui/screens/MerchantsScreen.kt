@@ -2,6 +2,8 @@ package com.example.extreapp.ui.screens
 
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -17,16 +19,20 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.ArrowBack
 import androidx.compose.material.icons.automirrored.outlined.ArrowForwardIos
 import androidx.compose.material.icons.outlined.Add
 import androidx.compose.material.icons.outlined.BarChart
 import androidx.compose.material.icons.outlined.Clear
+import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.Search
 import androidx.compose.material.icons.outlined.Storefront
 import androidx.compose.material3.Button
@@ -36,11 +42,13 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableLongStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
@@ -54,6 +62,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.window.Dialog
+import com.example.extreapp.data.local.entity.CategoryEntity
+import com.example.extreapp.data.local.entity.MerchantEntity
 import com.example.extreapp.data.local.entity.MerchantMonthlyTotal
 import com.example.extreapp.data.local.entity.MerchantSummaryItem
 import com.example.extreapp.data.repository.MerchantDetailData
@@ -71,6 +82,7 @@ fun MerchantsScreen(
     onSearchQueryChange: (String) -> Unit,
     onSelectMerchant: (Long) -> Unit,
     onBackFromDetail: () -> Unit,
+    onEditMerchant: (merchantId: Long, newDisplayName: String, newCategoryId: Long) -> Unit,
     onAddKeywordRuleForMerchant: (keyword: String, merchantName: String, categoryId: Long) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -78,8 +90,13 @@ fun MerchantsScreen(
     if (detail != null) {
         MerchantDetailAnalyticsScreen(
             detail = detail,
+            categories = uiState.categories,
+            existingMerchants = uiState.merchants,
             isPrivacyMode = uiState.isPrivacyModeEnabled,
             onBack = onBackFromDetail,
+            onEditMerchant = { newDisplayName, newCatId ->
+                onEditMerchant(detail.summary.merchant.id, newDisplayName, newCatId)
+            },
             onAddKeyword = { keyword ->
                 val catId = detail.summary.category?.id
                     ?: uiState.categories.firstOrNull()?.id
@@ -169,12 +186,15 @@ fun MerchantsScreen(
                         Text(
                             text = "${uiState.merchantSummaries.size} Satıcı",
                             style = MaterialTheme.typography.titleMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            modifier = Modifier.weight(1f)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Text(
                             text = "Toplam: ${if (uiState.isPrivacyModeEnabled) "***" else Formatters.formatCurrency(totalSpendAllMerchants)}",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
                         )
                     }
                 }
@@ -197,6 +217,7 @@ fun MerchantsScreen(
     }
 }
 
+@OptIn(ExperimentalLayoutApi::class)
 @Composable
 private fun MerchantSummaryRowCard(
     item: MerchantSummaryItem,
@@ -212,88 +233,112 @@ private fun MerchantSummaryRowCard(
             .fillMaxWidth()
             .applePressScale(onClick = onClick)
     ) {
-        Row(
+        Column(
             modifier = Modifier
                 .fillMaxWidth()
                 .padding(16.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.SpaceBetween
+            verticalArrangement = Arrangement.spacedBy(10.dp)
         ) {
+            // Top Row: Icon + Merchant Name & Category Badges on Left, Spend Amount on Right
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(12.dp),
-                modifier = Modifier.weight(1f)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                Box(
-                    modifier = Modifier
-                        .size(44.dp)
-                        .clip(CircleShape)
-                        .background(catColor.copy(alpha = 0.16f)),
-                    contentAlignment = Alignment.Center
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp),
+                    modifier = Modifier.weight(1f)
                 ) {
-                    Icon(
-                        imageVector = resolveCategoryIcon(item.category?.iconName ?: "Category"),
-                        contentDescription = null,
-                        tint = catColor,
-                        modifier = Modifier.size(22.dp)
-                    )
-                }
-
-                Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-                    Text(
-                        text = item.merchant.displayName,
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    Row(
-                        horizontalArrangement = Arrangement.spacedBy(6.dp),
-                        verticalAlignment = Alignment.CenterVertically
+                    Box(
+                        modifier = Modifier
+                            .size(44.dp)
+                            .clip(CircleShape)
+                            .background(catColor.copy(alpha = 0.16f)),
+                        contentAlignment = Alignment.Center
                     ) {
-                        item.category?.let { cat ->
-                            BadgePill(text = cat.name, color = catColor)
-                        }
-                        Text(
-                            text = "${item.transactionCount} işlem",
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        Icon(
+                            imageVector = resolveCategoryIcon(item.category?.iconName ?: "Category"),
+                            contentDescription = null,
+                            tint = catColor,
+                            modifier = Modifier.size(22.dp)
                         )
                     }
-                    if (item.ruleKeywords.isNotEmpty()) {
+
+                    Column(
+                        modifier = Modifier.weight(1f),
+                        verticalArrangement = Arrangement.spacedBy(5.dp)
+                    ) {
                         Text(
-                            text = "Kurallar: ${item.ruleKeywords.joinToString(", ")}",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            text = item.merchant.displayName,
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
                             maxLines = 1,
                             overflow = TextOverflow.Ellipsis
                         )
+                        FlowRow(
+                            horizontalArrangement = Arrangement.spacedBy(6.dp),
+                            verticalArrangement = Arrangement.spacedBy(4.dp),
+                            itemVerticalAlignment = Alignment.CenterVertically
+                        ) {
+                            item.category?.let { cat ->
+                                BadgePill(text = cat.name, color = catColor)
+                            }
+                            BadgePill(
+                                text = "${item.transactionCount} işlem",
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
                     }
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    Column(horizontalAlignment = Alignment.End) {
+                        Text(
+                            text = if (isPrivacyMode) "***" else Formatters.formatCurrency(item.netSpend),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 1
+                        )
+                        if (item.refundTotal > 0.0) {
+                            Text(
+                                text = if (isPrivacyMode) "***" else "-${Formatters.formatCurrency(item.refundTotal)} iade",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = AppleGreenLight,
+                                maxLines = 1
+                            )
+                        }
+                    }
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.size(14.dp)
+                    )
                 }
             }
 
-            Row(
-                verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
-            ) {
-                Column(horizontalAlignment = Alignment.End) {
+            // Bottom Full-Width Row for Rules (prevents squeezing the middle column)
+            if (item.ruleKeywords.isNotEmpty()) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
                     Text(
-                        text = if (isPrivacyMode) "***" else Formatters.formatCurrency(item.netSpend),
-                        style = MaterialTheme.typography.titleMedium,
-                        fontWeight = FontWeight.Bold
+                        text = "Kurallar: ${item.ruleKeywords.joinToString(", ")}",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis,
+                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
                     )
-                    if (item.refundTotal > 0.0) {
-                        Text(
-                            text = if (isPrivacyMode) "***" else "-${Formatters.formatCurrency(item.refundTotal)} iade",
-                            style = MaterialTheme.typography.labelSmall,
-                            color = AppleGreenLight
-                        )
-                    }
                 }
-                Icon(
-                    imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
-                    contentDescription = null,
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.size(14.dp)
-                )
             }
         }
     }
@@ -303,8 +348,11 @@ private fun MerchantSummaryRowCard(
 @Composable
 private fun MerchantDetailAnalyticsScreen(
     detail: MerchantDetailData,
+    categories: List<CategoryEntity>,
+    existingMerchants: List<MerchantEntity>,
     isPrivacyMode: Boolean = false,
     onBack: () -> Unit,
+    onEditMerchant: (newDisplayName: String, newCategoryId: Long) -> Unit,
     onAddKeyword: (String) -> Unit,
     modifier: Modifier = Modifier
 ) {
@@ -312,36 +360,91 @@ private fun MerchantDetailAnalyticsScreen(
     val catColor = summary.category?.let { Color.fromHex(it.colorHex) } ?: MaterialTheme.colorScheme.primary
     var newKeywordText by remember { mutableStateOf("") }
     var showAddKeywordField by remember { mutableStateOf(false) }
+    var showEditMerchantDialog by remember { mutableStateOf(false) }
+
+    if (showEditMerchantDialog) {
+        EditMerchantDialog(
+            merchant = summary.merchant,
+            initialCategoryId = summary.category?.id ?: summary.merchant.defaultCategoryId ?: categories.firstOrNull()?.id ?: 1L,
+            categories = categories,
+            existingMerchants = existingMerchants,
+            onDismiss = { showEditMerchantDialog = false },
+            onSave = { updatedName, updatedCategoryId ->
+                onEditMerchant(updatedName, updatedCategoryId)
+                showEditMerchantDialog = false
+            }
+        )
+    }
 
     LazyColumn(
         modifier = modifier.fillMaxSize(),
         contentPadding = PaddingValues(horizontal = 16.dp, vertical = 14.dp),
         verticalArrangement = Arrangement.spacedBy(14.dp)
     ) {
-        // 1. Back button + Merchant Header
+        // 1. Back button + Merchant Header + Edit Merchant Button
         item {
             Row(
+                modifier = Modifier.fillMaxWidth(),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(8.dp)
+                horizontalArrangement = Arrangement.SpaceBetween
             ) {
-                IconButton(onClick = onBack) {
-                    Icon(
-                        imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
-                        contentDescription = "Geri"
-                    )
-                }
-                Column {
-                    Text(
-                        text = summary.merchant.displayName,
-                        style = MaterialTheme.typography.headlineMedium,
-                        fontWeight = FontWeight.Bold
-                    )
-                    summary.category?.let { cat ->
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    IconButton(onClick = onBack) {
+                        Icon(
+                            imageVector = Icons.AutoMirrored.Outlined.ArrowBack,
+                            contentDescription = "Geri"
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
                         Text(
-                            text = cat.name,
-                            style = MaterialTheme.typography.bodyMedium,
-                            color = catColor,
-                            fontWeight = FontWeight.SemiBold
+                            text = summary.merchant.displayName,
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                        summary.category?.let { cat ->
+                            Text(
+                                text = cat.name,
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = catColor,
+                                fontWeight = FontWeight.SemiBold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                Surface(
+                    shape = RoundedCornerShape(12.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer,
+                    modifier = Modifier.applePressScale {
+                        showEditMerchantDialog = true
+                    }
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 8.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = "Satıcıyı Düzenle",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                            modifier = Modifier.size(16.dp)
+                        )
+                        Text(
+                            text = "Düzenle",
+                            style = MaterialTheme.typography.labelMedium,
+                            color = MaterialTheme.colorScheme.onPrimaryContainer,
+                            fontWeight = FontWeight.Bold
                         )
                     }
                 }
@@ -367,9 +470,14 @@ private fun MerchantDetailAnalyticsScreen(
                 ) {
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
                     ) {
-                        Column {
+                        Column(
+                            modifier = Modifier
+                                .weight(1f)
+                                .padding(end = 12.dp)
+                        ) {
                             Text(
                                 text = "Toplam Net Harcama",
                                 style = MaterialTheme.typography.labelMedium,
@@ -378,7 +486,10 @@ private fun MerchantDetailAnalyticsScreen(
                             Spacer(modifier = Modifier.height(4.dp))
                             Text(
                                 text = if (isPrivacyMode) "***" else Formatters.formatCurrency(summary.netSpend),
-                                style = MaterialTheme.typography.displayMedium
+                                style = MaterialTheme.typography.headlineMedium,
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis
                             )
                         }
                         Box(
@@ -401,44 +512,23 @@ private fun MerchantDetailAnalyticsScreen(
 
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Column {
-                            Text(
-                                text = "Aylık Ortalama",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = if (isPrivacyMode) "***" else Formatters.formatCurrency(monthlyAvg),
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                text = "Toplam İşlem",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${summary.transactionCount} adet",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
-                        Column(horizontalAlignment = Alignment.End) {
-                            Text(
-                                text = "Aktif Ay Sayısı",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
-                            )
-                            Text(
-                                text = "${detail.monthlyTotals.size} ay",
-                                style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.SemiBold
-                            )
-                        }
+                        DetailStatPill(
+                            label = "Aylık Ortalama",
+                            value = if (isPrivacyMode) "***" else Formatters.formatCurrency(monthlyAvg),
+                            modifier = Modifier.weight(1.2f)
+                        )
+                        DetailStatPill(
+                            label = "Toplam İşlem",
+                            value = "${summary.transactionCount} adet",
+                            modifier = Modifier.weight(0.9f)
+                        )
+                        DetailStatPill(
+                            label = "Aktif Ay",
+                            value = "${detail.monthlyTotals.size} ay",
+                            modifier = Modifier.weight(0.8f)
+                        )
                     }
                 }
             }
@@ -472,8 +562,10 @@ private fun MerchantDetailAnalyticsScreen(
                         Text(
                             text = "Eşleştirme Kuralları (${detail.rules.size})",
                             style = MaterialTheme.typography.titleMedium,
-                            fontWeight = FontWeight.Bold
+                            fontWeight = FontWeight.Bold,
+                            modifier = Modifier.weight(1f)
                         )
+                        Spacer(modifier = Modifier.width(8.dp))
                         Surface(
                             shape = RoundedCornerShape(10.dp),
                             color = MaterialTheme.colorScheme.primaryContainer,
@@ -569,6 +661,210 @@ private fun MerchantDetailAnalyticsScreen(
 }
 
 @Composable
+private fun DetailStatPill(
+    label: String,
+    value: String,
+    modifier: Modifier = Modifier
+) {
+    Surface(
+        shape = RoundedCornerShape(12.dp),
+        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+        modifier = modifier
+    ) {
+        Column(
+            modifier = Modifier.padding(horizontal = 10.dp, vertical = 8.dp),
+            verticalArrangement = Arrangement.spacedBy(2.dp)
+        ) {
+            Text(
+                text = label,
+                style = MaterialTheme.typography.labelSmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+            Text(
+                text = value,
+                style = MaterialTheme.typography.bodyMedium,
+                fontWeight = FontWeight.Bold,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+    }
+}
+
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun EditMerchantDialog(
+    merchant: MerchantEntity,
+    initialCategoryId: Long,
+    categories: List<CategoryEntity>,
+    existingMerchants: List<MerchantEntity>,
+    onDismiss: () -> Unit,
+    onSave: (newDisplayName: String, newCategoryId: Long) -> Unit
+) {
+    var merchantName by remember(merchant.id) { mutableStateOf(merchant.displayName) }
+    var selectedCategoryId by remember(merchant.id) { mutableLongStateOf(initialCategoryId) }
+
+    Dialog(onDismissRequest = onDismiss) {
+        Surface(
+            shape = RoundedCornerShape(24.dp),
+            color = MaterialTheme.colorScheme.surface,
+            tonalElevation = 8.dp,
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Column(
+                modifier = Modifier
+                    .padding(20.dp)
+                    .verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(14.dp)
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(40.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primaryContainer),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Edit,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary
+                        )
+                    }
+                    Column(modifier = Modifier.weight(1f)) {
+                        Text(
+                            text = "Satıcıyı Düzenle",
+                            style = MaterialTheme.typography.titleLarge,
+                            fontWeight = FontWeight.Bold
+                        )
+                        Text(
+                            text = "Satıcı adını veya kategorisini değiştirdiğinizde bağlı kurallar ve işlemler de güncellenir.",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                        )
+                    }
+                }
+
+                OutlinedTextField(
+                    value = merchantName,
+                    onValueChange = { merchantName = it },
+                    label = { Text("Satıcı Görünen Adı") },
+                    singleLine = true,
+                    shape = RoundedCornerShape(12.dp),
+                    modifier = Modifier.fillMaxWidth()
+                )
+
+                val otherMerchants = remember(existingMerchants, merchant.id) {
+                    existingMerchants.filter { it.id != merchant.id }
+                }
+                if (otherMerchants.isNotEmpty()) {
+                    Text(
+                        text = "Veya Mevcut Bir Satıcıyla Birleştir:",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .horizontalScroll(rememberScrollState()),
+                        horizontalArrangement = Arrangement.spacedBy(6.dp)
+                    ) {
+                        otherMerchants.take(15).forEach { m ->
+                            val isSelected = merchantName.equals(m.displayName, ignoreCase = true)
+                            Surface(
+                                shape = RoundedCornerShape(10.dp),
+                                color = if (isSelected) {
+                                    MaterialTheme.colorScheme.primary
+                                } else {
+                                    MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                                },
+                                modifier = Modifier.applePressScale {
+                                    merchantName = m.displayName
+                                    m.defaultCategoryId?.let { selectedCategoryId = it }
+                                }
+                            ) {
+                                Text(
+                                    text = m.displayName,
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = if (isSelected) {
+                                        MaterialTheme.colorScheme.onPrimary
+                                    } else {
+                                        MaterialTheme.colorScheme.onSurfaceVariant
+                                    },
+                                    modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp)
+                                )
+                            }
+                        }
+                    }
+                }
+
+                Text(
+                    text = "Kategori:",
+                    style = MaterialTheme.typography.labelMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+
+                FlowRow(
+                    horizontalArrangement = Arrangement.spacedBy(8.dp),
+                    verticalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    categories.forEach { cat ->
+                        val isSel = cat.id == selectedCategoryId
+                        val c = Color.fromHex(cat.colorHex)
+                        Surface(
+                            shape = RoundedCornerShape(10.dp),
+                            color = if (isSel) c.copy(alpha = 0.2f) else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.45f),
+                            modifier = Modifier
+                                .then(
+                                    if (isSel) Modifier.border(1.5.dp, c, RoundedCornerShape(10.dp)) else Modifier
+                                )
+                                .applePressScale { selectedCategoryId = cat.id }
+                        ) {
+                            Text(
+                                text = cat.name,
+                                style = MaterialTheme.typography.labelMedium,
+                                fontWeight = if (isSel) FontWeight.Bold else FontWeight.Normal,
+                                modifier = Modifier.padding(horizontal = 12.dp, vertical = 7.dp)
+                            )
+                        }
+                    }
+                }
+
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(10.dp)
+                ) {
+                    OutlinedButton(
+                        onClick = onDismiss,
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("İptal")
+                    }
+                    Button(
+                        onClick = {
+                            if (merchantName.isNotBlank()) {
+                                onSave(merchantName.trim(), selectedCategoryId)
+                            }
+                        },
+                        enabled = merchantName.isNotBlank(),
+                        shape = RoundedCornerShape(12.dp),
+                        modifier = Modifier.weight(1f)
+                    ) {
+                        Text("Kaydet")
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
 private fun MerchantMonthlySpendChartCard(
     monthlyTotals: List<MerchantMonthlyTotal>,
     barColor: Color,
@@ -608,13 +904,14 @@ private fun MerchantMonthlySpendChartCard(
             } else {
                 val maxSpend = (monthlyTotals.maxOfOrNull { it.netSpend } ?: 1.0).coerceAtLeast(1.0)
 
-                // Visual Bar Chart Row
+                // Horizontally scrollable Bar Chart Row so labels never overlap
                 Row(
                     modifier = Modifier
                         .fillMaxWidth()
-                        .height(150.dp)
+                        .height(156.dp)
+                        .horizontalScroll(rememberScrollState())
                         .padding(top = 8.dp),
-                    horizontalArrangement = Arrangement.SpaceEvenly,
+                    horizontalArrangement = Arrangement.spacedBy(12.dp, Alignment.CenterHorizontally),
                     verticalAlignment = Alignment.Bottom
                 ) {
                     monthlyTotals.forEach { monthItem ->
@@ -629,7 +926,7 @@ private fun MerchantMonthlySpendChartCard(
                             horizontalAlignment = Alignment.CenterHorizontally,
                             verticalArrangement = Arrangement.Bottom,
                             modifier = Modifier
-                                .weight(1f)
+                                .widthIn(min = 68.dp)
                                 .fillMaxHeight()
                         ) {
                             Text(
@@ -650,7 +947,8 @@ private fun MerchantMonthlySpendChartCard(
                             Text(
                                 text = Formatters.formatYearMonthShort(monthItem.yearMonth),
                                 style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1
                             )
                         }
                     }
@@ -659,17 +957,23 @@ private fun MerchantMonthlySpendChartCard(
                 HorizontalDivider(color = MaterialTheme.colorScheme.outlineVariant)
 
                 // Month-by-month detailed breakdown rows
-                Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                     monthlyTotals.sortedByDescending { it.yearMonth }.forEach { m ->
                         Row(
                             modifier = Modifier.fillMaxWidth(),
                             horizontalArrangement = Arrangement.SpaceBetween,
                             verticalAlignment = Alignment.CenterVertically
                         ) {
-                            Column {
+                            Column(
+                                modifier = Modifier
+                                    .weight(1f)
+                                    .padding(end = 12.dp)
+                            ) {
                                 Text(
                                     text = Formatters.formatYearMonthDisplay(m.yearMonth),
-                                    style = MaterialTheme.typography.titleMedium
+                                    style = MaterialTheme.typography.titleMedium,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
                                 )
                                 Text(
                                     text = buildString {
@@ -689,7 +993,8 @@ private fun MerchantMonthlySpendChartCard(
                             Text(
                                 text = if (isPrivacyMode) "***" else Formatters.formatCurrency(m.netSpend),
                                 style = MaterialTheme.typography.titleMedium,
-                                fontWeight = FontWeight.Bold
+                                fontWeight = FontWeight.Bold,
+                                maxLines = 1
                             )
                         }
                     }
@@ -698,4 +1003,3 @@ private fun MerchantMonthlySpendChartCard(
         }
     }
 }
-

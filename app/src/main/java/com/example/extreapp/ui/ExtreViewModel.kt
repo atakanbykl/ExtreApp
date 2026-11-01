@@ -402,6 +402,26 @@ class ExtreViewModel(
         }
     }
 
+    fun editExistingMerchant(
+        merchantId: Long,
+        newDisplayName: String,
+        newCategoryId: Long
+    ) {
+        viewModelScope.launch {
+            val targetMerchantId = withContext(Dispatchers.IO) {
+                repository.editMerchant(
+                    merchantId = merchantId,
+                    newDisplayName = newDisplayName,
+                    newCategoryId = newCategoryId
+                )
+            }
+            controlState.value = controlState.value.copy(
+                selectedMerchantId = targetMerchantId,
+                bannerMessage = "Satıcı bilgileri güncellendi: \"${newDisplayName.trim()}\""
+            )
+        }
+    }
+
     fun approveCandidateForRule(
         anchorRuleId: Long,
         candidate: RuleMatchCandidate
