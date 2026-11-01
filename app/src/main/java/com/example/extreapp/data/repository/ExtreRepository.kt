@@ -18,6 +18,7 @@ import com.example.extreapp.data.local.entity.MonthlyInstallmentForecast
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
 import com.example.extreapp.data.local.entity.PeriodFilterMode
 import com.example.extreapp.data.local.entity.RuleEntity
+import com.example.extreapp.data.local.entity.SubscriptionRadarSummary
 import com.example.extreapp.data.local.entity.TransactionEntity
 import com.example.extreapp.data.local.entity.TransactionType
 import com.example.extreapp.data.local.entity.TransactionWithDetails
@@ -29,6 +30,7 @@ import com.example.extreapp.domain.engine.RuleMatchCandidate
 import com.example.extreapp.domain.engine.RuleMatchCandidateType
 import com.example.extreapp.domain.engine.RuleMatchingEngine
 import com.example.extreapp.domain.engine.SmartKeywordExtractor
+import com.example.extreapp.domain.engine.SubscriptionDetector
 import com.example.extreapp.domain.engine.TurkishTextNormalizer
 import com.example.extreapp.domain.parser.StatementHeaderMetadata
 import com.example.extreapp.domain.parser.StatementImportReport
@@ -963,6 +965,13 @@ class ExtreRepository(
                 yearMonth
             }
         }
+    }
+
+    fun computeSubscriptionRadar(snap: DatabaseSnapshot = _snapshot.value): SubscriptionRadarSummary {
+        return SubscriptionDetector.detectSubscriptions(
+            transactions = snap.transactions,
+            categories = snap.categories
+        )
     }
 
     fun computeApprovalQueueGroups(snap: DatabaseSnapshot = _snapshot.value): List<ApprovalQueueGroup> {

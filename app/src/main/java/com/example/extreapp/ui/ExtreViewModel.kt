@@ -17,7 +17,9 @@ import com.example.extreapp.data.local.entity.MerchantSummaryItem
 import com.example.extreapp.data.local.entity.MonthOverMonthComparison
 import com.example.extreapp.data.local.entity.MonthlyOverviewSummary
 import com.example.extreapp.data.local.entity.PeriodFilterMode
+import com.example.extreapp.data.local.entity.RecurringPaymentType
 import com.example.extreapp.data.local.entity.RuleEntity
+import com.example.extreapp.data.local.entity.SubscriptionRadarSummary
 import com.example.extreapp.data.local.entity.TransactionSortOption
 import com.example.extreapp.data.repository.ExtreRepository
 import com.example.extreapp.data.repository.MerchantDetailData
@@ -62,6 +64,8 @@ data class ExtreUiState(
     val monthOverMonthComparison: MonthOverMonthComparison? = null,
     val selectedForecastMonth: String? = null,
     val installmentProjection: InstallmentCashflowProjection? = null,
+    val subscriptionRadar: SubscriptionRadarSummary? = null,
+    val selectedRecurringTabFilter: RecurringPaymentType? = null,
     val approvalQueueGroups: List<ApprovalQueueGroup> = emptyList(),
     val unapprovedTotalCount: Int = 0,
     val merchantSearchQuery: String = "",
@@ -92,6 +96,7 @@ private data class UiControlState(
     val isComparisonModeActive: Boolean = false,
     val comparisonTargetPeriod: String? = null,
     val selectedForecastMonth: String? = null,
+    val selectedRecurringTabFilter: RecurringPaymentType? = null,
     val merchantSearchQuery: String = "",
     val selectedMerchantId: Long? = null,
     val statementSearchQuery: String = "",
@@ -121,6 +126,7 @@ class ExtreViewModel(
     @Volatile private var cachedStatementSearch: String = ""
     @Volatile private var cachedFilteredStatements: List<LoadedStatementSummary> = emptyList()
     @Volatile private var cachedInstallmentProjection: InstallmentCashflowProjection? = null
+    @Volatile private var cachedSubscriptionRadar: SubscriptionRadarSummary? = null
 
     val uiState: StateFlow<ExtreUiState> = combine(
         repository.snapshot,
@@ -232,6 +238,14 @@ class ExtreViewModel(
             cachedInstallmentProjection
         }
 
+        val subscriptionRadar = if (snapChanged || cachedSubscriptionRadar == null) {
+            repository.computeSubscriptionRadar(snap).also {
+                cachedSubscriptionRadar = it
+            }
+        } else {
+            cachedSubscriptionRadar
+        }
+
         ExtreUiState(
             activeTab = ctrl.activeTab,
             isPrivacyModeEnabled = ctrl.isPrivacyModeEnabled,
@@ -247,6 +261,8 @@ class ExtreViewModel(
             monthOverMonthComparison = comparison,
             selectedForecastMonth = ctrl.selectedForecastMonth,
             installmentProjection = installmentProjection,
+            subscriptionRadar = subscriptionRadar,
+            selectedRecurringTabFilter = ctrl.selectedRecurringTabFilter,
             approvalQueueGroups = queueGroups,
             unapprovedTotalCount = overview.unapprovedCount,
             merchantSearchQuery = ctrl.merchantSearchQuery,
@@ -303,6 +319,12 @@ class ExtreViewModel(
     fun selectForecastMonth(yearMonth: String?) {
         controlState.value = controlState.value.copy(
             selectedForecastMonth = yearMonth
+        )
+    }
+
+    fun selectRecurringTabFilter(type: RecurringPaymentType?) {
+        controlState.value = controlState.value.copy(
+            selectedRecurringTabFilter = type
         )
     }
 

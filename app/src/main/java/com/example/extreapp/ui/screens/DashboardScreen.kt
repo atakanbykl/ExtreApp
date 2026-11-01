@@ -41,7 +41,10 @@ import androidx.compose.material.icons.outlined.Description
 import androidx.compose.material.icons.outlined.DonutLarge
 import androidx.compose.material.icons.outlined.FilterAltOff
 import androidx.compose.material.icons.outlined.PendingActions
+import androidx.compose.material.icons.outlined.PriceChange
+import androidx.compose.material.icons.outlined.Repeat
 import androidx.compose.material.icons.outlined.Schedule
+import androidx.compose.material.icons.outlined.Subscriptions
 import androidx.compose.material.icons.outlined.SwapHoriz
 import androidx.compose.material.icons.outlined.UploadFile
 import androidx.compose.material3.Button
@@ -80,6 +83,11 @@ import com.example.extreapp.data.local.entity.InstallmentCashflowProjection
 import com.example.extreapp.data.local.entity.MonthOverMonthComparison
 import com.example.extreapp.data.local.entity.MonthlyInstallmentForecast
 import com.example.extreapp.data.local.entity.PeriodFilterMode
+import com.example.extreapp.data.local.entity.RecurringPaymentItem
+import com.example.extreapp.data.local.entity.RecurringPaymentType
+import com.example.extreapp.data.local.entity.RecurringPaymentsSummary
+import com.example.extreapp.data.local.entity.RecurringSubscriptionItem
+import com.example.extreapp.data.local.entity.SubscriptionRadarSummary
 import com.example.extreapp.data.local.entity.TransactionSortOption
 import com.example.extreapp.data.local.entity.TransactionType
 import com.example.extreapp.data.local.entity.TransactionWithDetails
@@ -105,6 +113,7 @@ fun DashboardScreen(
     onToggleComparisonMode: () -> Unit = {},
     onSelectDashboardMode: (DashboardAnalyticsMode) -> Unit = {},
     onSelectForecastMonth: (String?) -> Unit = {},
+    onSelectRecurringTabFilter: (RecurringPaymentType?) -> Unit = {},
     onSelectComparisonTarget: (String) -> Unit = {},
     onSwapComparisonPeriods: () -> Unit = {},
     onOpenApprovalQueue: () -> Unit,
@@ -300,6 +309,24 @@ fun DashboardScreen(
                         },
                         label = { Text("Taksit Takvimi") }
                     )
+
+                    FilterChip(
+                        selected = uiState.dashboardMode == DashboardAnalyticsMode.RECURRING_PAYMENTS,
+                        onClick = {
+                            if (uiState.dashboardMode != DashboardAnalyticsMode.RECURRING_PAYMENTS) {
+                                haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                onSelectDashboardMode(DashboardAnalyticsMode.RECURRING_PAYMENTS)
+                            }
+                        },
+                        leadingIcon = {
+                            Icon(
+                                imageVector = Icons.Outlined.Repeat,
+                                contentDescription = null,
+                                modifier = Modifier.size(16.dp)
+                            )
+                        },
+                        label = { Text("Tekrarlanan Ödemeler") }
+                    )
                 }
             }
         }
@@ -472,6 +499,203 @@ fun DashboardScreen(
                     }
                 }
             }
+            DashboardAnalyticsMode.RECURRING_PAYMENTS -> {
+                val radar = uiState.subscriptionRadar
+                if (radar != null && radar.totalActiveCount > 0) {
+                    // 1. Hero Recurring Payments KPI Card
+                    item {
+                        RecurringPaymentsHeroCard(
+                            radar = radar,
+                            isPrivacyMode = uiState.isPrivacyModeEnabled
+                        )
+                    }
+
+                    // 2. Nearest Renewal / Upcoming Pill
+                    if (radar.nextUpcomingPayment != null) {
+                        item {
+                            SubscriptionUpcomingCard(
+                                nextUpcoming = radar.nextUpcomingPayment,
+                                isPrivacyMode = uiState.isPrivacyModeEnabled
+                            )
+                        }
+                    }
+
+                    // 3. Category Filter Tabs: Tümü / Abonelikler / Tekrarlı Harcamalar
+                    item {
+                        Row(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .horizontalScroll(rememberScrollState()),
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            FilterChip(
+                                selected = uiState.selectedRecurringTabFilter == null,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSelectRecurringTabFilter(null)
+                                },
+                                label = { Text("Tümü (${radar.totalActiveCount})") }
+                            )
+
+                            FilterChip(
+                                selected = uiState.selectedRecurringTabFilter == RecurringPaymentType.SUBSCRIPTION,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSelectRecurringTabFilter(RecurringPaymentType.SUBSCRIPTION)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Subscriptions,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = { Text("Abonelikler (${radar.subscriptionsCount})") }
+                            )
+
+                            FilterChip(
+                                selected = uiState.selectedRecurringTabFilter == RecurringPaymentType.RECURRING_EXPENSE,
+                                onClick = {
+                                    haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                                    onSelectRecurringTabFilter(RecurringPaymentType.RECURRING_EXPENSE)
+                                },
+                                leadingIcon = {
+                                    Icon(
+                                        imageVector = Icons.Outlined.Repeat,
+                                        contentDescription = null,
+                                        modifier = Modifier.size(16.dp)
+                                    )
+                                },
+                                label = { Text("Tekrarlı Harcamalar (${radar.recurringExpensesCount})") }
+                            )
+                        }
+                    }
+
+                    // 4. Two distinct categorized lists or filtered list
+                    if (uiState.selectedRecurringTabFilter == null) {
+                        // Section A: Abonelikler (Sabit Günlü)
+                        if (radar.subscriptions.isNotEmpty()) {
+                            item {
+                                Column(
+                                    modifier = Modifier.padding(top = 6.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = "Abonelikler (${radar.subscriptionsCount})",
+                                        style = MaterialTheme.typography.titleLarge
+                                    )
+                                    Text(
+                                        text = "Her ayın sabit gününde çekilen dijital ve servis abonelikleri.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            items(
+                                items = radar.subscriptions,
+                                key = { "sub_${it.id}" }
+                            ) { subItem ->
+                                RecurringPaymentCard(
+                                    item = subItem,
+                                    isPrivacyMode = uiState.isPrivacyModeEnabled
+                                )
+                            }
+                        }
+
+                        // Section B: Tekrarlı Harcamalar (Değişken Günlü)
+                        if (radar.recurringExpenses.isNotEmpty()) {
+                            item {
+                                Column(
+                                    modifier = Modifier.padding(top = 10.dp),
+                                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                                ) {
+                                    Text(
+                                        text = "Tekrarlı Harcamalar (${radar.recurringExpensesCount})",
+                                        style = MaterialTheme.typography.titleLarge
+                                    )
+                                    Text(
+                                        text = "Her ayın aynı gününde olmak zorunda olmayan, periyodik/sık tekrarlanan harcamalar.",
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                                    )
+                                }
+                            }
+
+                            items(
+                                items = radar.recurringExpenses,
+                                key = { "exp_${it.id}" }
+                            ) { expItem ->
+                                RecurringPaymentCard(
+                                    item = expItem,
+                                    isPrivacyMode = uiState.isPrivacyModeEnabled
+                                )
+                            }
+                        }
+                    } else if (uiState.selectedRecurringTabFilter == RecurringPaymentType.SUBSCRIPTION) {
+                        item {
+                            Column(
+                                modifier = Modifier.padding(top = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Abonelikler (${radar.subscriptionsCount})",
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                                Text(
+                                    text = "Her ayın sabit gününde çekilen dijital ve servis abonelikleri.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        items(
+                            items = radar.subscriptions,
+                            key = { "sub_${it.id}" }
+                        ) { subItem ->
+                            RecurringPaymentCard(
+                                item = subItem,
+                                isPrivacyMode = uiState.isPrivacyModeEnabled
+                            )
+                        }
+                    } else {
+                        item {
+                            Column(
+                                modifier = Modifier.padding(top = 6.dp),
+                                verticalArrangement = Arrangement.spacedBy(2.dp)
+                            ) {
+                                Text(
+                                    text = "Tekrarlı Harcamalar (${radar.recurringExpensesCount})",
+                                    style = MaterialTheme.typography.titleLarge
+                                )
+                                Text(
+                                    text = "Her ayın aynı gününde olmak zorunda olmayan, periyodik/sık tekrarlanan harcamalar.",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                                )
+                            }
+                        }
+
+                        items(
+                            items = radar.recurringExpenses,
+                            key = { "exp_${it.id}" }
+                        ) { expItem ->
+                            RecurringPaymentCard(
+                                item = expItem,
+                                isPrivacyMode = uiState.isPrivacyModeEnabled
+                            )
+                        }
+                    }
+                } else {
+                    item {
+                        RecurringPaymentsEmptyCard(
+                            onPickStatementFile = onPickStatementFile
+                        )
+                    }
+                }
+            }
             DashboardAnalyticsMode.OVERVIEW -> {
             // 2. Unapproved Queue Call-to-Action Banner
             if (uiState.unapprovedTotalCount > 0) {
@@ -555,6 +779,100 @@ fun DashboardScreen(
                     onToggleCategoryFilter(catId)
                 }
             )
+        }
+
+        // 3.5 Subscription Radar Teaser in Overview
+        val radar = uiState.subscriptionRadar
+        if (radar != null && radar.activeSubscriptionsCount > 0) {
+            item {
+                Card(
+                    shape = RoundedCornerShape(18.dp),
+                    colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .border(
+                            width = 0.5.dp,
+                            color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                            shape = RoundedCornerShape(18.dp)
+                        )
+                        .applePressScale {
+                            haptic.performHapticFeedback(HapticFeedbackType.TextHandleMove)
+                            onSelectDashboardMode(DashboardAnalyticsMode.RECURRING_PAYMENTS)
+                        }
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(14.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(12.dp),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .size(38.dp)
+                                    .clip(CircleShape)
+                                    .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                                contentAlignment = Alignment.Center
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.Repeat,
+                                    contentDescription = null,
+                                    tint = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.size(20.dp)
+                                )
+                            }
+                            Column(modifier = Modifier.weight(1f)) {
+                                Text(
+                                    text = "Tekrarlanan Ödemeler (${radar.totalActiveCount})",
+                                    style = MaterialTheme.typography.titleMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "${radar.subscriptionsCount} Abonelik • ${radar.recurringExpensesCount} Tekrarlı (${Formatters.formatCurrency(radar.totalMonthlyCommitment, isMasked = uiState.isPrivacyModeEnabled)})",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    maxLines = 1,
+                                    overflow = TextOverflow.Ellipsis
+                                )
+                            }
+                        }
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Row(
+                            verticalAlignment = Alignment.CenterVertically,
+                            horizontalArrangement = Arrangement.spacedBy(6.dp)
+                        ) {
+                            if (radar.priceIncreasedCount > 0) {
+                                Surface(
+                                    shape = RoundedCornerShape(8.dp),
+                                    color = AppleOrangeLight.copy(alpha = 0.16f)
+                                ) {
+                                    Text(
+                                        text = "Zam Var",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = AppleOrangeLight,
+                                        fontWeight = FontWeight.Bold,
+                                        modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                                    )
+                                }
+                            }
+                            Icon(
+                                imageVector = Icons.AutoMirrored.Outlined.ArrowForwardIos,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier.size(14.dp)
+                            )
+                        }
+                    }
+                }
+            }
         }
 
         // 4. Category Breakdown Section Header
@@ -1668,6 +1986,8 @@ private fun CategoryComparisonCard(
                     )
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 // Change Badge
                 Surface(
                     shape = RoundedCornerShape(8.dp),
@@ -1840,13 +2160,18 @@ private fun ComparisonMiniStat(
         Text(
             text = title,
             style = MaterialTheme.typography.labelSmall,
-            color = MaterialTheme.colorScheme.onSurfaceVariant
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
+        Spacer(modifier = Modifier.height(2.dp))
         Text(
             text = value,
             style = MaterialTheme.typography.bodyMedium,
             fontWeight = FontWeight.Bold,
-            color = MaterialTheme.colorScheme.onSurface
+            color = MaterialTheme.colorScheme.onSurface,
+            maxLines = 1,
+            overflow = TextOverflow.Ellipsis
         )
     }
 }
@@ -2160,12 +2485,16 @@ private fun ActiveInstallmentPlanCard(
                     }
                 }
 
+                Spacer(modifier = Modifier.width(8.dp))
+
                 Column(horizontalAlignment = Alignment.End) {
                     Text(
                         text = Formatters.formatCurrency(plan.monthlyAmount, isMasked = isPrivacyMode),
                         style = MaterialTheme.typography.titleMedium,
                         fontWeight = FontWeight.Bold,
-                        color = if (plan.type == TransactionType.REFUND) AppleGreenLight else MaterialTheme.colorScheme.onSurface
+                        color = if (plan.type == TransactionType.REFUND) AppleGreenLight else MaterialTheme.colorScheme.onSurface,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
                     )
                     Text(
                         text = if (plan.type == TransactionType.REFUND) "(İade Taksiti)" else "/ ay",
@@ -2221,24 +2550,32 @@ private fun ActiveInstallmentPlanCard(
                     color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
                 ) {
                     Text(
-                        text = "${plan.remainingInstallments} taksit kaldı",
+                        text = "${plan.remainingInstallments} kaldı",
                         style = MaterialTheme.typography.labelSmall,
-                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
-                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                        modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp),
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1
                     )
                 }
+
+                Spacer(modifier = Modifier.width(6.dp))
 
                 Text(
                     text = "Kalan: ${Formatters.formatCurrency(plan.remainingBalance, isMasked = isPrivacyMode)}",
                     style = MaterialTheme.typography.labelMedium,
                     fontWeight = FontWeight.SemiBold,
-                    color = MaterialTheme.colorScheme.primary
+                    color = MaterialTheme.colorScheme.primary,
+                    maxLines = 1,
+                    overflow = TextOverflow.Ellipsis
                 )
+
+                Spacer(modifier = Modifier.width(6.dp))
 
                 Text(
                     text = "Bitiş: ${Formatters.formatYearMonthDisplay(plan.endYearMonth)}",
                     style = MaterialTheme.typography.labelSmall,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1
                 )
             }
         }
@@ -2334,6 +2671,605 @@ private fun InstallmentEmptyCard(
             )
             Text(
                 text = "Yüklenen ekstrelerde devam eden veya tamamlanan taksitli işlem (05/09, 02/06 vb.) tespit edilemedi. Taksitli işlemler içeren yeni bir ekstre yükleyerek taksit takviminizi görüntüleyebilirsiniz.",
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center
+            )
+            OutlinedButton(
+                onClick = onPickStatementFile,
+                shape = RoundedCornerShape(12.dp)
+            ) {
+                Icon(Icons.Outlined.UploadFile, contentDescription = null, modifier = Modifier.size(16.dp))
+                Spacer(modifier = Modifier.width(6.dp))
+                Text("Ekstre Yükle")
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecurringPaymentsHeroCard(
+    radar: RecurringPaymentsSummary,
+    isPrivacyMode: Boolean
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(20.dp),
+            verticalArrangement = Arrangement.spacedBy(16.dp)
+        ) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Row(
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(8.dp)
+                ) {
+                    Box(
+                        modifier = Modifier
+                            .size(36.dp)
+                            .clip(CircleShape)
+                            .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.12f)),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.Repeat,
+                            contentDescription = null,
+                            tint = MaterialTheme.colorScheme.primary,
+                            modifier = Modifier.size(20.dp)
+                        )
+                    }
+                    Text(
+                        text = "TEKRARLANAN ÖDEMELER",
+                        style = MaterialTheme.typography.labelMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary
+                    )
+                }
+            }
+
+            Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Text(
+                    text = Formatters.formatCurrency(radar.totalMonthlyCommitment, isMasked = isPrivacyMode),
+                    style = MaterialTheme.typography.headlineLarge.copy(
+                        fontSize = 32.sp,
+                        fontWeight = FontWeight.Bold
+                    ),
+                    color = MaterialTheme.colorScheme.primary
+                )
+                Text(
+                    text = "Aylık tespit edilen düzenli harcama ve servis ödemesi toplamı.",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant
+                )
+            }
+
+            // Sub-category Breakdown Badges (Abonelikler vs Tekrarlı Harcamalar)
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(10.dp)
+            ) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Sabit Abonelik",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)
+                            ) {
+                                Text(
+                                    text = "${radar.subscriptionsCount} adet",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.primary,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = Formatters.formatCurrency(radar.subscriptionsMonthlyTotal, isMasked = isPrivacyMode),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f),
+                    modifier = Modifier.weight(1f)
+                ) {
+                    Column(
+                        modifier = Modifier.padding(12.dp),
+                        verticalArrangement = Arrangement.spacedBy(4.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Tekrarlı Harcama",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f, fill = false)
+                            )
+                            Spacer(modifier = Modifier.width(4.dp))
+                            Surface(
+                                shape = RoundedCornerShape(6.dp),
+                                color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.12f)
+                            ) {
+                                Text(
+                                    text = "${radar.recurringExpensesCount} adet",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    modifier = Modifier.padding(horizontal = 5.dp, vertical = 1.dp)
+                                )
+                            }
+                        }
+                        Text(
+                            text = Formatters.formatCurrency(radar.recurringExpensesMonthlyTotal, isMasked = isPrivacyMode),
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.onSurface,
+                            maxLines = 1,
+                            overflow = TextOverflow.Ellipsis
+                        )
+                    }
+                }
+            }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
+            )
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Box(modifier = Modifier.weight(1.2f)) {
+                    ComparisonMiniStat(
+                        title = "Yıllık Projeksiyon",
+                        value = Formatters.formatCurrency(radar.totalAnnualCommitment, isMasked = isPrivacyMode)
+                    )
+                }
+                Box(modifier = Modifier.weight(0.9f)) {
+                    ComparisonMiniStat(
+                        title = "Toplam Servis",
+                        value = "${radar.totalActiveCount} Ödeme"
+                    )
+                }
+                Box(modifier = Modifier.weight(0.9f)) {
+                    ComparisonMiniStat(
+                        title = "Fiyat Takibi",
+                        value = if (radar.priceIncreasedCount > 0) "${radar.priceIncreasedCount} Zam" else "Sabit Fiyat"
+                    )
+                }
+            }
+
+            if (radar.priceIncreasedCount > 0) {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = AppleOrangeLight.copy(alpha = 0.14f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.PriceChange,
+                            contentDescription = null,
+                            tint = AppleOrangeLight,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "${radar.priceIncreasedCount} ödemede son dönemde fiyat artışı tespit edildi. Detayları aşağıdaki listeden inceleyebilirsiniz.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            } else {
+                Surface(
+                    shape = RoundedCornerShape(14.dp),
+                    color = AppleGreenLight.copy(alpha = 0.12f),
+                    modifier = Modifier.fillMaxWidth()
+                ) {
+                    Row(
+                        modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Icon(
+                            imageVector = Icons.Outlined.AutoAwesome,
+                            contentDescription = null,
+                            tint = AppleGreenLight,
+                            modifier = Modifier.size(18.dp)
+                        )
+                        Text(
+                            text = "Tekrarlanan ödemelerinizi takip ederek bütçenizdeki sabit harcama yükünü kontrol altında tutabilirsiniz.",
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface
+                        )
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun SubscriptionUpcomingCard(
+    nextUpcoming: RecurringPaymentItem,
+    isPrivacyMode: Boolean
+) {
+    Card(
+        shape = RoundedCornerShape(18.dp),
+        colors = CardDefaults.cardColors(
+            containerColor = MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.28f)
+        ),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 1.dp,
+                color = MaterialTheme.colorScheme.primary.copy(alpha = 0.3f),
+                shape = RoundedCornerShape(18.dp)
+            )
+    ) {
+        Row(
+            modifier = Modifier
+                .fillMaxWidth()
+                .padding(14.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.SpaceBetween
+        ) {
+            Row(
+                verticalAlignment = Alignment.CenterVertically,
+                horizontalArrangement = Arrangement.spacedBy(10.dp),
+                modifier = Modifier.weight(1f)
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(36.dp)
+                        .clip(CircleShape)
+                        .background(MaterialTheme.colorScheme.primary.copy(alpha = 0.15f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = Icons.Outlined.Schedule,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(18.dp)
+                    )
+                }
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = "En Yakın: ${nextUpcoming.name}",
+                        style = MaterialTheme.typography.titleSmall,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (nextUpcoming.isFixedBillingDay && nextUpcoming.paymentDayOfMonth != null) {
+                            "${Formatters.formatCurrency(nextUpcoming.monthlyAmount, isMasked = isPrivacyMode)} • Her ayın ${nextUpcoming.paymentDayOfMonth}'i"
+                        } else {
+                            "${Formatters.formatCurrency(nextUpcoming.monthlyAmount, isMasked = isPrivacyMode)} • Değişken gün"
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+            }
+            Spacer(modifier = Modifier.width(8.dp))
+            if (nextUpcoming.daysUntilNextBilling != null) {
+                Surface(
+                    shape = RoundedCornerShape(10.dp),
+                    color = MaterialTheme.colorScheme.primary
+                ) {
+                    Text(
+                        text = when (nextUpcoming.daysUntilNextBilling) {
+                            0 -> "Bugün"
+                            1 -> "Yarın"
+                            else -> "${nextUpcoming.daysUntilNextBilling} gün kaldı"
+                        },
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimary,
+                        fontWeight = FontWeight.Bold,
+                        modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),
+                        maxLines = 1
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecurringPaymentCard(
+    item: RecurringPaymentItem,
+    isPrivacyMode: Boolean
+) {
+    val brandColor = item.brandColorHex?.let { Color(it) }
+        ?: item.category?.let { Color.fromHex(it.colorHex) }
+        ?: MaterialTheme.colorScheme.primary
+
+    Card(
+        shape = RoundedCornerShape(20.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        elevation = CardDefaults.cardElevation(defaultElevation = 1.dp),
+        modifier = Modifier
+            .fillMaxWidth()
+            .border(
+                width = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.35f),
+                shape = RoundedCornerShape(20.dp)
+            )
+    ) {
+        Column(
+            modifier = Modifier.padding(16.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            // Row 1: Brand Icon + Title/Subtitle Column + Monthly Amount Column
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Box(
+                    modifier = Modifier
+                        .size(42.dp)
+                        .clip(CircleShape)
+                        .background(brandColor.copy(alpha = 0.16f)),
+                    contentAlignment = Alignment.Center
+                ) {
+                    Icon(
+                        imageVector = resolveCategoryIcon(item.category?.iconName ?: if (item.paymentType == RecurringPaymentType.SUBSCRIPTION) "Subscriptions" else "Repeat"),
+                        contentDescription = null,
+                        tint = brandColor,
+                        modifier = Modifier.size(22.dp)
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(12.dp))
+
+                Column(modifier = Modifier.weight(1f)) {
+                    Text(
+                        text = item.name,
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Spacer(modifier = Modifier.height(2.dp))
+                    Text(
+                        text = if (item.isFixedBillingDay && item.paymentDayOfMonth != null) {
+                            "Her ayın ${item.paymentDayOfMonth}'i • Sabit Gün"
+                        } else {
+                            item.frequencyDescription
+                        },
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                }
+
+                Spacer(modifier = Modifier.width(10.dp))
+
+                Column(horizontalAlignment = Alignment.End) {
+                    Text(
+                        text = Formatters.formatCurrency(item.monthlyAmount, isMasked = isPrivacyMode),
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.Bold,
+                        color = MaterialTheme.colorScheme.primary,
+                        maxLines = 1,
+                        overflow = TextOverflow.Ellipsis
+                    )
+                    Text(
+                        text = if (item.paymentType == RecurringPaymentType.SUBSCRIPTION) "aylık" else "aylık ort.",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                }
+            }
+
+            HorizontalDivider(
+                thickness = 0.5.dp,
+                color = MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.25f)
+            )
+
+            // Row 2: Badges and Status - Structured to never collide or wrap awkwardly
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                // Left side tags: Category type badge + Zam badge + optional Card Info
+                Row(
+                    modifier = Modifier.weight(1f, fill = false),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    // Type Badge
+                    Surface(
+                        shape = RoundedCornerShape(8.dp),
+                        color = if (item.paymentType == RecurringPaymentType.SUBSCRIPTION) {
+                            MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.45f)
+                        } else {
+                            MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)
+                        }
+                    ) {
+                        Text(
+                            text = if (item.paymentType == RecurringPaymentType.SUBSCRIPTION) "Abonelik" else "Tekrarlı",
+                            style = MaterialTheme.typography.labelSmall,
+                            color = if (item.paymentType == RecurringPaymentType.SUBSCRIPTION) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                            fontWeight = FontWeight.SemiBold,
+                            modifier = Modifier.padding(horizontal = 7.dp, vertical = 3.dp)
+                        )
+                    }
+
+                    // Price change badge
+                    if (item.isPriceIncreased && item.priceChangePercent != null) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = AppleOrangeLight.copy(alpha = 0.18f)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp),
+                                verticalAlignment = Alignment.CenterVertically,
+                                horizontalArrangement = Arrangement.spacedBy(3.dp)
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Outlined.ArrowUpward,
+                                    contentDescription = null,
+                                    tint = AppleOrangeLight,
+                                    modifier = Modifier.size(11.dp)
+                                )
+                                Text(
+                                    text = "+%${"%.0f".format(item.priceChangePercent)}",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    fontWeight = FontWeight.Bold,
+                                    color = AppleOrangeLight
+                                )
+                            }
+                        }
+                    } else if (item.priceChangePercent != null && item.priceChangePercent < -0.5) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = AppleGreenLight.copy(alpha = 0.18f)
+                        ) {
+                            Text(
+                                text = "-%${"%.0f".format(kotlin.math.abs(item.priceChangePercent))}",
+                                style = MaterialTheme.typography.labelSmall,
+                                fontWeight = FontWeight.Bold,
+                                color = AppleGreenLight,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+
+                    // Card info pill
+                    if (!item.cardInfo.isNullOrBlank()) {
+                        Surface(
+                            shape = RoundedCornerShape(8.dp),
+                            color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.4f)
+                        ) {
+                            Text(
+                                text = item.cardInfo,
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1,
+                                overflow = TextOverflow.Ellipsis,
+                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 3.dp)
+                            )
+                        }
+                    }
+                }
+
+                Spacer(modifier = Modifier.width(8.dp))
+
+                // Right side: Timing / Last action status
+                val isUrgent = item.isFixedBillingDay && (item.daysUntilNextBilling ?: 99) <= 7
+                val statusText = if (item.isFixedBillingDay && item.daysUntilNextBilling != null) {
+                    when (item.daysUntilNextBilling) {
+                        0 -> "Bugün yenileniyor"
+                        1 -> "Yarın yenilenecek"
+                        else -> "${item.daysUntilNextBilling} gün kaldı"
+                    }
+                } else {
+                    "Son: ${Formatters.formatEpochDay(item.lastPaymentDateEpochDay)}"
+                }
+
+                Surface(
+                    shape = RoundedCornerShape(8.dp),
+                    color = if (isUrgent) MaterialTheme.colorScheme.primary.copy(alpha = 0.12f) else Color.Transparent
+                ) {
+                    Text(
+                        text = statusText,
+                        style = MaterialTheme.typography.labelSmall,
+                        color = if (isUrgent) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
+                        fontWeight = if (isUrgent) FontWeight.Bold else FontWeight.Medium,
+                        maxLines = 1,
+                        modifier = Modifier.padding(horizontal = if (isUrgent) 6.dp else 0.dp, vertical = 2.dp)
+                    )
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun RecurringPaymentsEmptyCard(
+    onPickStatementFile: () -> Unit
+) {
+    Card(
+        shape = RoundedCornerShape(24.dp),
+        colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.surface),
+        modifier = Modifier.fillMaxWidth()
+    ) {
+        Column(
+            modifier = Modifier.padding(24.dp),
+            horizontalAlignment = Alignment.CenterHorizontally,
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Surface(
+                shape = CircleShape,
+                color = MaterialTheme.colorScheme.primaryContainer,
+                modifier = Modifier.size(56.dp)
+            ) {
+                Box(contentAlignment = Alignment.Center) {
+                    Icon(
+                        imageVector = Icons.Outlined.Repeat,
+                        contentDescription = null,
+                        tint = MaterialTheme.colorScheme.primary,
+                        modifier = Modifier.size(28.dp)
+                    )
+                }
+            }
+            Text(
+                text = "Tekrarlanan Ödeme Bulunamadı",
+                style = MaterialTheme.typography.titleMedium,
+                fontWeight = FontWeight.Bold
+            )
+            Text(
+                text = "Yüklenen ekstrelerde sabit abonelikler (Spotify, YouTube vb.) veya periyodik tekrarlı harcamalar tespit edilemedi. Yeni bir ekstre yükleyerek tekrarlanan ödemeler analizinizi başlatabilirsiniz.",
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center

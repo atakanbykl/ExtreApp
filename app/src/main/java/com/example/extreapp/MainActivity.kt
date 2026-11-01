@@ -533,6 +533,7 @@ fun ExtreAppRoot() {
                                 onToggleComparisonMode = { viewModel.toggleComparisonMode() },
                                 onSelectDashboardMode = { viewModel.setDashboardMode(it) },
                                 onSelectForecastMonth = { viewModel.selectForecastMonth(it) },
+                                onSelectRecurringTabFilter = { viewModel.selectRecurringTabFilter(it) },
                                 onSelectComparisonTarget = { viewModel.setComparisonTargetPeriod(it) },
                                 onSwapComparisonPeriods = { viewModel.swapComparisonPeriods() },
                                 onOpenApprovalQueue = { viewModel.selectTab(AppTab.APPROVAL_QUEUE) },

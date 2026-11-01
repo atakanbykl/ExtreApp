@@ -8,7 +8,13 @@ enum class PeriodFilterMode {
 enum class DashboardAnalyticsMode {
     OVERVIEW,           // Dönem Özeti (Kategori pasta grafiği, harcamalar)
     COMPARISON,         // Aydan Aya Kıyaslama Modu
-    INSTALLMENTS        // Gelecek Taksit Projeksiyonu & Taksit Takvimi
+    INSTALLMENTS,       // Gelecek Taksit Projeksiyonu & Taksit Takvimi
+    RECURRING_PAYMENTS; // Tekrarlanan Ödemeler (Abonelikler & Tekrarlı Harcamalar)
+
+    companion object {
+        @JvmField
+        val SUBSCRIPTIONS = RECURRING_PAYMENTS
+    }
 }
 
 enum class TransactionSortOption(val title: String) {
@@ -176,6 +182,73 @@ data class InstallmentCashflowProjection(
     val activePlans: List<ActiveInstallmentPlan>,
     val completedPlans: List<ActiveInstallmentPlan>
 )
+
+enum class RecurringPaymentType(val title: String) {
+    SUBSCRIPTION("Abonelikler"),               // Sabit günlü abonelikler (Spotify, Netflix, YouTube...)
+    RECURRING_EXPENSE("Tekrarlı Harcamalar")   // Değişken günlü tekrarlanan ödemeler (akaryakıt, spor, market, faturalar...)
+}
+
+enum class SubscriptionBillingFrequency(val title: String) {
+    MONTHLY("Aylık"),
+    YEARLY("Yıllık"),
+    WEEKLY("Haftalık"),
+    VARIABLE("Değişken / Fatura")
+}
+
+data class SubscriptionPriceHistory(
+    val dateEpochDay: Long,
+    val yearMonth: String,
+    val amount: Double
+)
+
+data class RecurringPaymentItem(
+    val id: String,
+    val name: String,
+    val rawMerchant: String,
+    val category: CategoryEntity?,
+    val paymentType: RecurringPaymentType,
+    val monthlyAmount: Double,
+    val latestAmount: Double,
+    val previousAmount: Double?,
+    val priceChangePercent: Double?,
+    val isPriceIncreased: Boolean,
+    val billingFrequency: SubscriptionBillingFrequency,
+    val isFixedBillingDay: Boolean,         // true: Abonelik (sabit gün), false: Tekrarlı harcama (değişken gün)
+    val paymentDayOfMonth: Int?,            // Abonelikler için sabit gün (örn: 25)
+    val lastPaymentDateEpochDay: Long,
+    val nextExpectedDateEpochDay: Long?,
+    val daysUntilNextBilling: Int?,
+    val paymentCount: Int,
+    val frequencyDescription: String,       // "Her ayın 25'i (Sabit)" veya "Ayda ~3 kez (Değişken günler)"
+    val history: List<SubscriptionPriceHistory>,
+    val cardInfo: String?,
+    val isKnownService: Boolean,
+    val brandColorHex: Long? = null,
+    val confidenceScore: Float
+)
+
+typealias RecurringSubscriptionItem = RecurringPaymentItem
+
+data class RecurringPaymentsSummary(
+    val totalMonthlyCommitment: Double,             // Toplam aylık tekrarlanan harcamalar
+    val totalAnnualCommitment: Double,              // Yıllık projeksiyon
+    val subscriptionsMonthlyTotal: Double,          // Yalnızca sabit aboneliklerin aylık toplamı
+    val recurringExpensesMonthlyTotal: Double,      // Değişken tekrarlı harcamaların aylık toplamı
+    val subscriptionsCount: Int,                    // Abonelik sayısı
+    val recurringExpensesCount: Int,                // Tekrarlı harcama sayısı
+    val totalActiveCount: Int,                      // Toplam aktif kayıt sayısı
+    val priceIncreasedCount: Int,                   // Fiyatı artanlar sayısı
+    val nextUpcomingPayment: RecurringPaymentItem?, // En yakın beklenen ödeme
+    val subscriptions: List<RecurringPaymentItem>,  // Sabit günlü abonelikler listesi
+    val recurringExpenses: List<RecurringPaymentItem>, // Değişken günlü tekrarlı harcamalar listesi
+    val allItems: List<RecurringPaymentItem>        // Tümü
+) {
+    val activeSubscriptionsCount: Int get() = totalActiveCount
+    val upcomingThisWeekCount: Int get() = allItems.count { it.daysUntilNextBilling != null && it.daysUntilNextBilling in 0..7 }
+    val nextUpcomingSubscription: RecurringPaymentItem? get() = nextUpcomingPayment
+}
+
+typealias SubscriptionRadarSummary = RecurringPaymentsSummary
 
 
 

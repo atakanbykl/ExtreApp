@@ -11,6 +11,7 @@ import com.example.extreapp.domain.parser.StatementParserDispatcher
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -483,5 +484,115 @@ class ExampleUnitTest {
         assertEquals(6, refundPlan.totalInstallments)
         assertEquals(4, refundPlan.remainingInstallments)
         assertEquals("2027-02", refundPlan.endYearMonth)
+    }
+
+    @Test
+    fun subscriptionRadarDetectionAndPriceIncreaseTest() {
+        val bytes = loadHesapOzetiBytes()
+        val parsed = StatementParserDispatcher.parseAndNormalize(bytes, "HESAP_OZETI.csv")
+        val repo = ExtreRepository(InMemoryPersistenceStore())
+        repo.importParsedStatement(parsed)
+
+        val radar = repo.computeSubscriptionRadar()
+
+        // 1. Verify detected 2 categories: Subscriptions (Sabit Günlü) vs Recurring Expenses (Değişken Günlü)
+        assertTrue("En az 4 sabit abonelik tespit edilmeli", radar.subscriptionsCount >= 4)
+        assertTrue("En az 1 tekrarlı harcama tespit edilmeli", radar.recurringExpensesCount >= 1)
+        assertTrue(radar.subscriptionsMonthlyTotal > 0.0)
+        assertTrue(radar.recurringExpensesMonthlyTotal > 0.0)
+        assertEquals(radar.subscriptionsMonthlyTotal + radar.recurringExpensesMonthlyTotal, radar.totalMonthlyCommitment, 0.01)
+        assertEquals(radar.totalMonthlyCommitment * 12.0, radar.totalAnnualCommitment, 0.01)
+
+        // Verify categorical invariants:
+        assertTrue(radar.subscriptions.all {
+            it.isFixedBillingDay &&
+            it.paymentType == com.example.extreapp.data.local.entity.RecurringPaymentType.SUBSCRIPTION &&
+            it.paymentDayOfMonth != null
+        })
+        assertTrue(radar.recurringExpenses.all {
+            !it.isFixedBillingDay &&
+            it.paymentType == com.example.extreapp.data.local.entity.RecurringPaymentType.RECURRING_EXPENSE &&
+            it.paymentDayOfMonth == null
+        })
+
+        // 2. Verify Spotify detection (Category: Subscription)
+        val spotify = radar.subscriptions.firstOrNull { it.name.contains("Spotify") }
+        assertNotNull("Spotify tespit edilmeli", spotify)
+        assertEquals(165.00, spotify!!.monthlyAmount, 0.01)
+        assertEquals(25, spotify.paymentDayOfMonth)
+        assertTrue(spotify.isKnownService)
+        assertTrue(spotify.isFixedBillingDay)
+        assertEquals(1.0f, spotify.confidenceScore, 0.01f)
+
+        // 3. Verify Amazon Prime detection (24.90 TL, Category: Subscription)
+        val prime = radar.subscriptions.firstOrNull { it.name.contains("Amazon Prime") }
+        assertNotNull("Amazon Prime tespit edilmeli", prime)
+        assertEquals(24.90, prime!!.monthlyAmount, 0.01)
+        assertEquals(27, prime.paymentDayOfMonth)
+        assertTrue(prime.isFixedBillingDay)
+
+        // 4. Verify Google One detection (719.99 TL, Category: Subscription)
+        val googleOne = radar.subscriptions.firstOrNull { it.name.contains("Google One") }
+        assertNotNull("Google One tespit edilmeli", googleOne)
+        assertEquals(719.99, googleOne!!.monthlyAmount, 0.01)
+        assertEquals(22, googleOne.paymentDayOfMonth)
+        assertTrue(googleOne.isFixedBillingDay)
+
+        // 5. Verify YouTube Premium detection (119.99 TL, Category: Subscription)
+        val youtube = radar.subscriptions.firstOrNull { it.name.contains("YouTube Premium") }
+        assertNotNull("YouTube Premium tespit edilmeli", youtube)
+        assertEquals(119.99, youtube!!.monthlyAmount, 0.01)
+        assertEquals(21, youtube.paymentDayOfMonth)
+        assertTrue(youtube.isFixedBillingDay)
+
+        // 6. Verify Recurring Expense detection (Variable days, non-subscription repeat)
+        val gymfit = radar.recurringExpenses.firstOrNull { it.name.contains("Gymfit", ignoreCase = true) || it.rawMerchant.contains("GYMFIT", ignoreCase = true) }
+        assertNotNull("Gymfit değişken günlü tekrarlı harcama olarak tespit edilmeli", gymfit)
+        assertFalse(gymfit!!.isFixedBillingDay)
+        assertNull(gymfit.paymentDayOfMonth)
+        assertEquals(com.example.extreapp.data.local.entity.RecurringPaymentType.RECURRING_EXPENSE, gymfit.paymentType)
+
+        // 7. Verify Next Upcoming payment prediction
+        assertNotNull(radar.nextUpcomingPayment)
+        val upcoming = radar.nextUpcomingPayment!!
+        assertNotNull(upcoming.daysUntilNextBilling)
+        assertTrue(upcoming.daysUntilNextBilling!! >= 0)
+
+        // 8. Verify Price Increase calculation with simulated multi-statement data
+        val simulatedTxs = listOf(
+            com.example.extreapp.data.local.entity.TransactionEntity(
+                id = 901L,
+                dateEpochDay = java.time.LocalDate.parse("2026-09-25").toEpochDay(),
+                yearMonth = "2026-09",
+                statementYearMonth = "2026-09",
+                rawDescription = "IYZICO /SPOTIFY.COM ISTANBUL TR",
+                cleanedDescription = "Spotify",
+                amount = 124.00,
+                signedAmount = 124.00,
+                type = TransactionType.EXPENSE,
+                dedupHash = "sim_sub_1"
+            ),
+            com.example.extreapp.data.local.entity.TransactionEntity(
+                id = 902L,
+                dateEpochDay = java.time.LocalDate.parse("2026-10-25").toEpochDay(),
+                yearMonth = "2026-10",
+                statementYearMonth = "2026-10",
+                rawDescription = "IYZICO /SPOTIFY.COM ISTANBUL TR",
+                cleanedDescription = "Spotify",
+                amount = 165.00,
+                signedAmount = 165.00,
+                type = TransactionType.EXPENSE,
+                dedupHash = "sim_sub_2"
+            )
+        )
+        val simulatedRadar = com.example.extreapp.domain.engine.SubscriptionDetector.detectSubscriptions(simulatedTxs)
+        assertEquals(1, simulatedRadar.activeSubscriptionsCount)
+        val simSpotify = simulatedRadar.subscriptions.first()
+        assertTrue("Spotify için fiyat artışı tespit edilmeli", simSpotify.isPriceIncreased)
+        assertEquals(1, simulatedRadar.priceIncreasedCount)
+        assertEquals(165.00, simSpotify.latestAmount, 0.01)
+        assertEquals(124.00, simSpotify.previousAmount!!, 0.01)
+        // 165 - 124 = 41 TL increase -> 41 / 124 * 100 = ~33.06%
+        assertEquals(33.06, simSpotify.priceChangePercent!!, 0.5)
     }
 }
